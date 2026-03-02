@@ -1,9 +1,10 @@
 # Sound Hearing Aid
 
-Rust prototype scaffold.
+Rust prototype for a directional audio UI.
+
+## What’s included
+- Core types: `ChannelEnergies`, `DirectionFrame`, `Sector8`
+- `DirectionEstimator` trait
 
 ## Status
-Only the project scaffold and a placeholder `main.rs` are present.
-
-## Next steps
-Add core types, estimators, pipeline, and UI wiring.
+Runnable scaffold with the core types and estimator trait in place. Estimators, pipeline, source, and UI are still missing.
