@@ -10,6 +10,7 @@ Rust prototype for a directional audio UI.
 - `DirectionSmoother` for attack/decay smoothing
 - `ProcessingPipeline` to run estimator + smoothing
 - `DemoSource` that simulates moving sound energy
+- Ring UI drawing module (`ui::ring`)
 
 ## Status
-Runnable scaffold with the core types, stereo estimator, 7.1 estimator, smoothing, pipeline, and demo audio source in place. UI wiring is still missing.
+Runnable scaffold with the core types, stereo estimator, 7.1 estimator, smoothing, pipeline, demo audio source, and ring UI in place. App wiring is still missing.
