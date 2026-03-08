@@ -1,16 +1,29 @@
 # Sound Hearing Aid
 
-Rust prototype for a directional audio UI.
+Small Rust prototype for a directional audio UI.
 
 ## What’s included
-- Core types: `ChannelEnergies`, `DirectionFrame`, `Sector8`
-- `DirectionEstimator` trait
-- `StereoEstimator` that fills the front/side portion of the ring
-- `Surround71Estimator` that projects 7.1 channel energies into the ring
+- 8-sector ring UI
+- `StereoEstimator` that fills the honest front/side portion of the ring
+- `Surround71Estimator` that projects 7.1 channel energies into the full ring
 - `DirectionSmoother` for attack/decay smoothing
 - `ProcessingPipeline` to run estimator + smoothing
 - `DemoSource` that simulates moving sound energy
-- Ring UI drawing module (`ui::ring`)
+- App wiring with `eframe`
 
 ## Status
-Runnable scaffold with the core types, stereo estimator, 7.1 estimator, smoothing, pipeline, demo audio source, and ring UI in place. App wiring is still missing.
+Runnable prototype with the core types, estimators, smoothing, pipeline, demo audio source, ring UI, and app wiring in place.
+
+## What’s not included yet
+- Real loopback capture
+- PCM frame parsing from an actual device
+- Platform-specific channel layout discovery
+
+## Run
+cargo run
+
+## Next step
+Replace `DemoSource` with a real audio source that produces `ChannelEnergies` from PCM frames.  
+Pipeline stays the same:
+
+Audio source -> ChannelEnergies -> estimator -> smoother -> UI
