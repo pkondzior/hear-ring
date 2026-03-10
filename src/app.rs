@@ -127,12 +127,6 @@ impl SoundHearingAidApp {
             (SourceMode::SystemAudio, AudioSourceState::Starting) => {
                 "Starting ScreenCaptureKit audio capture."
             }
-            (SourceMode::SystemAudio, AudioSourceState::PermissionDenied) => {
-                "Grant Screen Recording permission in Privacy & Security and restart the app."
-            }
-            (SourceMode::SystemAudio, AudioSourceState::UnsupportedPlatform) => {
-                "System audio capture is only available on macOS."
-            }
             (SourceMode::SystemAudio, AudioSourceState::Error(_)) => {
                 "ScreenCaptureKit failed to start. Check permissions and try again."
             }
@@ -252,7 +246,7 @@ impl eframe::App for SoundHearingAidApp {
 
                     ui.add_space(16.0);
                     ui.heading("System audio");
-                    ui.label("ScreenCaptureKit startup and source state are wired in.");
+                    ui.label("System audio startup and source state are wired in.");
                     ui.label("PCM-to-energy decoding is not implemented yet.");
                 });
             });
