@@ -6,9 +6,12 @@ use screencapturekit::prelude::*;
 use super::{AudioSource, AudioSourceState};
 use crate::types::{ChannelEnergies, ChannelLayout};
 
-struct StereoLevels {
-    left: f32,
-    right: f32,
+#[derive(Debug, Clone, Copy, Default)]
+struct StereoAnalysis {
+    left_rms: f32,
+    right_rms: f32,
+    pan: f32,
+    width: f32,
 }
 
 #[derive(Debug)]
@@ -110,7 +113,22 @@ impl ScreenCaptureSource {
     }
 
     fn map_error(error: impl std::fmt::Display) -> AudioSourceState {
-        AudioSourceState::Error(error.to_string())
+        let message = error.to_string();
+        let lower = message.to_lowercase();
+
+        // ScreenCaptureKit fails early when Screen Recording permission has not been granted.
+        // The exact error type/message varies across macOS versions and host apps, so we
+        // conservatively match common substrings.
+        if lower.contains("screen recording")
+            || lower.contains("not authorized")
+            || lower.contains("not authorised")
+            || (lower.contains("permission") && lower.contains("denied"))
+            || (lower.contains("access") && lower.contains("denied"))
+        {
+            return AudioSourceState::PermissionDenied;
+        }
+
+        AudioSourceState::Error(message)
     }
 }
 
@@ -140,10 +158,10 @@ struct AudioCaptureHandler {
 
 impl SCStreamOutputTrait for AudioCaptureHandler {
     fn did_output_sample_buffer(&self, sample: CMSampleBuffer, _type: SCStreamOutputType) {
-        match StereoLevels::try_from(&sample) {
-            Ok(levels) => {
+        match StereoAnalysis::try_from(&sample) {
+            Ok(analysis) => {
                 if let Ok(mut guard) = self.shared.lock() {
-                    guard.energies = levels.into();
+                    guard.energies = analysis.into();
                     guard.state = AudioSourceState::Running;
                 }
             }
@@ -156,7 +174,7 @@ impl SCStreamOutputTrait for AudioCaptureHandler {
     }
 }
 
-impl TryFrom<&CMSampleBuffer> for StereoLevels {
+impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
     type Error = StereoDecodeError;
 
     fn try_from(sample: &CMSampleBuffer) -> Result<Self, Self::Error> {
@@ -204,8 +222,8 @@ impl TryFrom<&CMSampleBuffer> for StereoLevels {
             .audio_buffer_list()
             .ok_or(StereoDecodeError::UnsupportedAudioFormat)?;
 
-        let (left, right) = match buffers.num_buffers() {
-            1 => rms_interleaved(
+        let analysis = match buffers.num_buffers() {
+            1 => analyze_interleaved(
                 buffers
                     .get(0)
                     .ok_or(StereoDecodeError::UnsupportedAudioFormat)?
@@ -213,67 +231,65 @@ impl TryFrom<&CMSampleBuffer> for StereoLevels {
                 channel_count,
                 bytes_per_frame,
             )?,
-            count if count >= 2 => (
-                rms_planar(
-                    buffers
-                        .get(0)
-                        .ok_or(StereoDecodeError::UnsupportedAudioFormat)?
-                        .data(),
-                )?,
-                rms_planar(
-                    buffers
-                        .get(1)
-                        .ok_or(StereoDecodeError::UnsupportedAudioFormat)?
-                        .data(),
-                )?,
-            ),
+            count if count >= 2 => analyze_planar(
+                buffers
+                    .get(0)
+                    .ok_or(StereoDecodeError::UnsupportedAudioFormat)?
+                    .data(),
+                buffers
+                    .get(1)
+                    .ok_or(StereoDecodeError::UnsupportedAudioFormat)?
+                    .data(),
+            )?,
             _ => return Err(StereoDecodeError::UnsupportedAudioFormat),
         };
 
-        Ok(Self { left, right })
+        Ok(analysis)
     }
 }
 
-impl From<StereoLevels> for ChannelEnergies {
-    fn from(levels: StereoLevels) -> Self {
+impl From<StereoAnalysis> for ChannelEnergies {
+    fn from(analysis: StereoAnalysis) -> Self {
         Self {
-            fl: levels.left,
-            fr: levels.right,
+            fl: analysis.left_rms,
+            fr: analysis.right_rms,
+            stereo_pan: analysis.pan,
+            stereo_width: analysis.width,
             ..Self::default()
         }
     }
 }
 
-/// Compute root mean square for a single planar PCM buffer.
-/// Each buffer contains samples for one channel only.
-fn rms_planar(bytes: &[u8]) -> Result<f32, StereoDecodeError> {
-    if bytes.is_empty() {
-        return Ok(0.0);
+/// Analyze left/right PCM data stored in separate planar buffers.
+fn analyze_planar(
+    left_bytes: &[u8],
+    right_bytes: &[u8],
+) -> Result<StereoAnalysis, StereoDecodeError> {
+    let left = samples(left_bytes)?;
+    let right = samples(right_bytes)?;
+
+    let frame_count = left.len().min(right.len());
+    if frame_count == 0 {
+        return Ok(StereoAnalysis::default());
     }
 
-    if bytes.len() % size_of::<f32>() != 0 {
-        return Err(StereoDecodeError::UnsupportedAudioFormat);
-    }
-
-    let sample_count = bytes.len() / size_of::<f32>();
-    if sample_count == 0 {
-        return Ok(0.0);
-    }
-
-    let samples = unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) };
-
-    Ok(rms(samples))
+    Ok(analyze_pairs(
+        left.iter()
+            .take(frame_count)
+            .copied()
+            .zip(right.iter().take(frame_count).copied()),
+    ))
 }
 
-/// Compute left/right root mean square for a single interleaved PCM buffer.
+/// Analyze left/right PCM data stored in a single interleaved buffer.
 /// Treat the first channel as left and the second as right.
-fn rms_interleaved(
+fn analyze_interleaved(
     bytes: &[u8],
     channel_count: usize,
     bytes_per_frame: usize,
-) -> Result<(f32, f32), StereoDecodeError> {
+) -> Result<StereoAnalysis, StereoDecodeError> {
     if bytes.is_empty() {
-        return Ok((0.0, 0.0));
+        return Ok(StereoAnalysis::default());
     }
 
     if bytes.len() % bytes_per_frame != 0 {
@@ -285,39 +301,74 @@ fn rms_interleaved(
         return Err(StereoDecodeError::UnsupportedAudioFormat);
     }
 
-    let sample_count = bytes.len() / size_of::<f32>();
-    let samples = unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) };
+    let samples = samples(bytes)?;
 
     let frame_count = bytes.len() / bytes_per_frame;
     if frame_count == 0 {
-        return Ok((0.0, 0.0));
+        return Ok(StereoAnalysis::default());
     }
 
-    let mut left_sum = 0.0f32;
-    let mut right_sum = 0.0f32;
-
-    for frame in 0..frame_count {
+    Ok(analyze_pairs((0..frame_count).map(|frame| {
         let base = frame * samples_per_frame;
         let left = samples[base];
         let right = samples[base + (1usize.min(channel_count.saturating_sub(1)))];
+        (left, right)
+    })))
+}
+
+fn samples(bytes: &[u8]) -> Result<&[f32], StereoDecodeError> {
+    if bytes.len() % size_of::<f32>() != 0 {
+        return Err(StereoDecodeError::UnsupportedAudioFormat);
+    }
+
+    let sample_count = bytes.len() / size_of::<f32>();
+    Ok(unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) })
+}
+
+fn analyze_pairs<I>(pairs: I) -> StereoAnalysis
+where
+    I: IntoIterator<Item = (f32, f32)>,
+{
+    let mut frame_count = 0usize;
+    let mut left_sum = 0.0f32;
+    let mut right_sum = 0.0f32;
+    let mut mid_sum = 0.0f32;
+    let mut side_sum = 0.0f32;
+
+    for (left, right) in pairs {
+        frame_count += 1;
+
+        let sum = left + right;
+        let diff = left - right;
 
         left_sum += left * left;
         right_sum += right * right;
+        mid_sum += 0.25 * sum * sum;
+        side_sum += 0.25 * diff * diff;
     }
 
-    Ok((
-        (left_sum / frame_count as f32).sqrt(),
-        (right_sum / frame_count as f32).sqrt(),
-    ))
-}
-
-/// Compute root mean square for a slice of PCM samples.
-/// This gives the UI pipeline a stable per-buffer energy value.
-fn rms(samples: &[f32]) -> f32 {
-    if samples.is_empty() {
-        return 0.0;
+    if frame_count == 0 {
+        return StereoAnalysis::default();
     }
 
-    let energy = samples.iter().map(|sample| sample * sample).sum::<f32>();
-    (energy / samples.len() as f32).sqrt()
+    let frames = frame_count as f32;
+
+    let left_power = left_sum / frames;
+    let right_power = right_sum / frames;
+    let mid_power = mid_sum / frames;
+    let side_power = side_sum / frames;
+
+    let left_rms = left_power.sqrt();
+    let right_rms = right_power.sqrt();
+    let mid_rms = mid_power.sqrt();
+    let side_rms = side_power.sqrt();
+    // Convert a power ratio into decibels for stereo pan estimation.
+    let pan_db = 10.0 * ((right_power + 1e-12) / (left_power + 1e-12)).log10();
+
+    StereoAnalysis {
+        left_rms,
+        right_rms,
+        pan: (pan_db / 18.0).clamp(-1.0, 1.0),
+        width: (side_rms / (mid_rms + side_rms + 1e-6)).clamp(0.0, 1.0),
+    }
 }

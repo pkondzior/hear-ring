@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Vec2};
+use eframe::egui::{self, Slider, Vec2};
 
-use crate::pipeline::ProcessingPipeline;
+use crate::pipeline::{PipelineTuning, ProcessingPipeline};
 use crate::source::{AudioSource, AudioSourceState, DemoSource, ScreenCaptureSource};
 use crate::types::{ChannelEnergies, ChannelLayout, DirectionFrame, ORDERED_SECTORS};
 use crate::ui::ring::{draw_direction_ring, energy_bar};
@@ -91,6 +91,14 @@ impl SoundHearingAidApp {
         }
     }
 
+    fn tuning(&self) -> PipelineTuning {
+        self.pipeline.tuning()
+    }
+
+    fn set_tuning(&mut self, tuning: PipelineTuning) {
+        self.pipeline.set_tuning(tuning);
+    }
+
     fn set_layout(&mut self, layout: ChannelLayout) {
         self.source.set_layout(layout);
         self.pipeline.set_layout(layout);
@@ -127,6 +135,12 @@ impl SoundHearingAidApp {
             (SourceMode::SystemAudio, AudioSourceState::Starting) => {
                 "Starting ScreenCaptureKit audio capture."
             }
+            (SourceMode::SystemAudio, AudioSourceState::PermissionDenied) => {
+                "Grant Screen Recording permission in Privacy & Security and restart the app."
+            }
+            (SourceMode::SystemAudio, AudioSourceState::UnsupportedPlatform) => {
+                "System audio capture is only available on macOS."
+            }
             (SourceMode::SystemAudio, AudioSourceState::Error(_)) => {
                 "ScreenCaptureKit failed to start. Check permissions and try again."
             }
@@ -145,6 +159,7 @@ impl eframe::App for SoundHearingAidApp {
 
         let source_state = self.source.state();
         let source_mode = self.source.mode();
+        let mut tuning = self.tuning();
 
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -209,45 +224,104 @@ impl eframe::App for SoundHearingAidApp {
                     );
                     ui.add_space(12.0);
 
-                    let size = Vec2::new(520.0, 520.0);
+                    // Keep the ring inside its half of the split view so the
+                    // left and right panes do not visually overlap.
+                    let ring_size = ui.available_width().min(520.0);
+                    let size = Vec2::splat(ring_size);
                     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                     draw_direction_ring(ui.painter(), rect, &self.latest_frame);
                 });
 
                 columns[1].vertical(|ui| {
-                    ui.heading("Source");
-                    ui.label(format!("Selected source: {}", source_mode.label()));
-                    ui.label(format!(
-                        "Source state: {}",
-                        Self::source_state_message(&source_state)
-                    ));
-                    ui.label(Self::source_help_text(source_mode, &source_state));
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.heading("Source");
+                            ui.label(format!("Selected source: {}", source_mode.label()));
+                            ui.label(format!(
+                                "Source state: {}",
+                                Self::source_state_message(&source_state)
+                            ));
+                            ui.label(Self::source_help_text(source_mode, &source_state));
 
-                    ui.add_space(16.0);
-                    ui.heading("Current channel energies");
-                    ui.label(format!("Input mode: {}", self.source.layout().label()));
-                    ui.add_space(8.0);
+                            ui.add_space(16.0);
+                            ui.heading("Current channel energies");
+                            ui.label(format!("Input mode: {}", self.source.layout().label()));
+                            ui.add_space(8.0);
 
-                    energy_bar(ui, "FL / L", self.latest_energies.fl.max(self.latest_energies.sl));
-                    energy_bar(ui, "FR / R", self.latest_energies.fr.max(self.latest_energies.sr));
-                    energy_bar(ui, "C", self.latest_energies.c);
-                    energy_bar(ui, "SL", self.latest_energies.sl);
-                    energy_bar(ui, "SR", self.latest_energies.sr);
-                    energy_bar(ui, "RL", self.latest_energies.rl);
-                    energy_bar(ui, "RR", self.latest_energies.rr);
-                    energy_bar(ui, "LFE", self.latest_energies.lfe);
+                            energy_bar(
+                                ui,
+                                "FL / L",
+                                self.latest_energies.fl.max(self.latest_energies.sl),
+                            );
+                            energy_bar(
+                                ui,
+                                "FR / R",
+                                self.latest_energies.fr.max(self.latest_energies.sr),
+                            );
+                            energy_bar(ui, "C", self.latest_energies.c);
+                            energy_bar(ui, "SL", self.latest_energies.sl);
+                            energy_bar(ui, "SR", self.latest_energies.sr);
+                            energy_bar(ui, "RL", self.latest_energies.rl);
+                            energy_bar(ui, "RR", self.latest_energies.rr);
+                            energy_bar(ui, "LFE", self.latest_energies.lfe);
 
-                    ui.add_space(16.0);
-                    ui.heading("Sector scores");
-                    for sector in ORDERED_SECTORS {
-                        let value = self.latest_frame.scores[sector.index()];
-                        energy_bar(ui, sector.label(), value);
-                    }
+                            if matches!(self.source.layout(), ChannelLayout::Stereo) {
+                                ui.add_space(16.0);
+                                ui.heading("Stereo diagnostics");
+                                ui.label(format!("Pan: {:+.2}", self.latest_energies.stereo_pan));
+                                ui.label(format!(
+                                    "Smoothed pan: {:+.2}",
+                                    self.pipeline.stereo_smoothed_pan()
+                                ));
+                                ui.label(format!(
+                                    "Latch: {}",
+                                    self.pipeline.stereo_pan_latch_label()
+                                ));
+                                ui.label(format!("Width: {:.2}", self.latest_energies.stereo_width));
+                            }
 
-                    ui.add_space(16.0);
-                    ui.heading("System audio");
-                    ui.label("System audio startup and source state are wired in.");
-                    ui.label("PCM-to-energy decoding is not implemented yet.");
+                            ui.add_space(16.0);
+                            ui.heading("Sector scores");
+                            for sector in ORDERED_SECTORS {
+                                let value = self.latest_frame.scores[sector.index()];
+                                energy_bar(ui, sector.label(), value);
+                            }
+
+                            ui.add_space(16.0);
+                            ui.heading("Tuning");
+                            ui.add(
+                                Slider::new(&mut tuning.stereo.min_energy, 0.0..=0.25)
+                                    .text("Stereo min energy"),
+                            );
+                            ui.add(
+                                Slider::new(&mut tuning.stereo.max_energy, 0.1..=2.5)
+                                    .text("Stereo max energy"),
+                            );
+                            ui.add(
+                                Slider::new(&mut tuning.stereo.pan_gain, 0.5..=4.0)
+                                    .text("Stereo pan gain"),
+                            );
+                            ui.add(
+                                Slider::new(&mut tuning.smoother.attack_alpha, 0.0..=1.0)
+                                    .text("Attack"),
+                            );
+                            ui.add(
+                                Slider::new(&mut tuning.smoother.decay_alpha, 0.0..=1.0)
+                                    .text("Decay"),
+                            );
+
+                            if tuning.stereo.max_energy <= tuning.stereo.min_energy {
+                                tuning.stereo.max_energy = tuning.stereo.min_energy + 0.001;
+                            }
+
+                            self.set_tuning(tuning);
+
+                            ui.add_space(16.0);
+                            ui.heading("System audio");
+                            ui.label("System audio startup and source state are wired in.");
+                            ui.label("PCM-to-energy decoding is not implemented yet.");
+                        });
                 });
             });
         });

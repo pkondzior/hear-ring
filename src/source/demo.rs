@@ -73,6 +73,15 @@ impl AudioSource for DemoSource {
             }
         }
 
+        if matches!(self.layout, ChannelLayout::Stereo) {
+            let total = energies.fl + energies.fr;
+            if total > f32::EPSILON {
+                energies.stereo_pan =
+                    ((energies.fr - energies.fl) / (total + 1e-6)).clamp(-1.0, 1.0);
+                energies.stereo_width = energies.stereo_pan.abs() * 0.6;
+            }
+        }
+
         energies
     }
 }

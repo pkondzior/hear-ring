@@ -90,6 +90,11 @@ pub struct ChannelEnergies {
     pub sr: f32,
     pub rl: f32,
     pub rr: f32,
+    /// Stereo-only cue from raw PCM.
+    /// -1.0 = hard left, 0.0 = center, +1.0 = hard right.
+    pub stereo_pan: f32,
+    /// 0.0 = center/mono-heavy, 1.0 = wide side-heavy content.
+    pub stereo_width: f32,
 }
 
 impl ChannelEnergies {

@@ -42,7 +42,10 @@ pub fn draw_direction_ring(painter: &egui::Painter, rect: egui::Rect, frame: &Di
         Align2::CENTER_CENTER,
         format!(
             "{}\nconf {:.2}",
-            frame.dominant_sector().map(|sector| sector.label()).unwrap_or("-"),
+            frame
+                .dominant_sector()
+                .map(|sector| sector.label())
+                .unwrap_or("-"),
             frame.confidence
         ),
         FontId::proportional(22.0),

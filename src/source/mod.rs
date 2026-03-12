@@ -23,6 +23,9 @@ pub trait AudioSource {
 pub enum AudioSourceState {
     Running,
     Starting,
+    PermissionDenied,
+    #[allow(dead_code)]
+    UnsupportedPlatform,
     Error(String),
 }
 
@@ -31,6 +34,8 @@ impl AudioSourceState {
         match self {
             AudioSourceState::Running => "Running",
             AudioSourceState::Starting => "Starting",
+            AudioSourceState::PermissionDenied => "Permission denied",
+            AudioSourceState::UnsupportedPlatform => "Unsupported platform",
             AudioSourceState::Error(_) => "Error",
         }
     }
@@ -66,7 +71,7 @@ mod screencapture_fallback {
         }
 
         fn state(&self) -> AudioSourceState {
-            AudioSourceState::Error("System audio capture is only available on macOS".to_owned())
+            AudioSourceState::UnsupportedPlatform
         }
     }
 }

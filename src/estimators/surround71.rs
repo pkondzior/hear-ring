@@ -62,18 +62,14 @@ impl DirectionEstimator for Surround71Estimator {
             *score = (*score / sum) * gate;
         }
 
-        let left_sum = scores[Sector8::FL.index()]
-            + scores[Sector8::L.index()]
-            + scores[Sector8::BL.index()];
-        let right_sum = scores[Sector8::FR.index()]
-            + scores[Sector8::R.index()]
-            + scores[Sector8::BR.index()];
-        let front_sum = scores[Sector8::FL.index()]
-            + scores[Sector8::F.index()]
-            + scores[Sector8::FR.index()];
-        let rear_sum = scores[Sector8::BL.index()]
-            + scores[Sector8::B.index()]
-            + scores[Sector8::BR.index()];
+        let left_sum =
+            scores[Sector8::FL.index()] + scores[Sector8::L.index()] + scores[Sector8::BL.index()];
+        let right_sum =
+            scores[Sector8::FR.index()] + scores[Sector8::R.index()] + scores[Sector8::BR.index()];
+        let front_sum =
+            scores[Sector8::FL.index()] + scores[Sector8::F.index()] + scores[Sector8::FR.index()];
+        let rear_sum =
+            scores[Sector8::BL.index()] + scores[Sector8::B.index()] + scores[Sector8::BR.index()];
 
         let lateral_separation = (left_sum - right_sum).abs();
         let depth_separation = (front_sum - rear_sum).abs();

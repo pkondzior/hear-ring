@@ -1,5 +1,5 @@
-use crate::estimators::{DirectionEstimator, StereoEstimator, Surround71Estimator};
-use crate::smoothing::DirectionSmoother;
+use crate::estimators::{DirectionEstimator, StereoEstimator, StereoTuning, Surround71Estimator};
+use crate::smoothing::{DirectionSmoother, SmootherTuning};
 use crate::types::{ChannelEnergies, ChannelLayout, DirectionFrame};
 
 pub struct ProcessingPipeline {
@@ -7,6 +7,12 @@ pub struct ProcessingPipeline {
     stereo_estimator: StereoEstimator,
     surround_estimator: Surround71Estimator,
     smoother: DirectionSmoother,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PipelineTuning {
+    pub stereo: StereoTuning,
+    pub smoother: SmootherTuning,
 }
 
 impl ProcessingPipeline {
@@ -21,6 +27,26 @@ impl ProcessingPipeline {
 
     pub fn set_layout(&mut self, layout: ChannelLayout) {
         self.layout = layout;
+    }
+
+    pub fn tuning(&self) -> PipelineTuning {
+        PipelineTuning {
+            stereo: self.stereo_estimator.tuning(),
+            smoother: self.smoother.tuning(),
+        }
+    }
+
+    pub fn set_tuning(&mut self, tuning: PipelineTuning) {
+        self.stereo_estimator.set_tuning(tuning.stereo);
+        self.smoother.set_tuning(tuning.smoother);
+    }
+
+    pub fn stereo_smoothed_pan(&self) -> f32 {
+        self.stereo_estimator.smoothed_pan()
+    }
+
+    pub fn stereo_pan_latch_label(&self) -> &'static str {
+        self.stereo_estimator.pan_latch_label()
     }
 
     pub fn update(&mut self, energies: &ChannelEnergies) -> DirectionFrame {
