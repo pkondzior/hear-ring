@@ -45,10 +45,6 @@ impl ProcessingPipeline {
         self.stereo_estimator.smoothed_pan()
     }
 
-    pub fn stereo_pan_latch_label(&self) -> &'static str {
-        self.stereo_estimator.pan_latch_label()
-    }
-
     pub fn update(&mut self, energies: &ChannelEnergies) -> DirectionFrame {
         let raw = match self.layout {
             ChannelLayout::Stereo => self.stereo_estimator.estimate(energies),

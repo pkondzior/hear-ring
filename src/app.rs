@@ -274,10 +274,6 @@ impl eframe::App for SoundHearingAidApp {
                                     "Smoothed pan: {:+.2}",
                                     self.pipeline.stereo_smoothed_pan()
                                 ));
-                                ui.label(format!(
-                                    "Latch: {}",
-                                    self.pipeline.stereo_pan_latch_label()
-                                ));
                                 ui.label(format!("Width: {:.2}", self.latest_energies.stereo_width));
                             }
 
