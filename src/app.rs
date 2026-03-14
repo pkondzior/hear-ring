@@ -1,11 +1,156 @@
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Slider, Vec2};
+#[cfg(target_os = "macos")]
+use objc2::MainThreadMarker;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{
+    NSNormalWindowLevel, NSPopUpMenuWindowLevel, NSView, NSWindow, NSWindowAnimationBehavior,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
+};
+#[cfg(target_os = "macos")]
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use crate::pipeline::{PipelineTuning, ProcessingPipeline};
 use crate::source::{AudioSource, AudioSourceState, DemoSource, ScreenCaptureSource};
 use crate::types::{ChannelEnergies, ChannelLayout, DirectionFrame, ORDERED_SECTORS};
 use crate::ui::ring::{draw_direction_ring, energy_bar};
+
+#[cfg(target_os = "macos")]
+fn with_ns_window<T>(frame: &eframe::Frame, f: impl FnOnce(&NSWindow) -> T) -> Result<T, String> {
+    let window_handle = frame
+        .window_handle()
+        .map_err(|err| format!("window handle unavailable: {err}"))?;
+
+    let RawWindowHandle::AppKit(handle) = window_handle.as_raw() else {
+        return Err("not an AppKit window".to_owned());
+    };
+
+    // SAFETY: The pointer comes from the live eframe window handle and is used
+    // immediately on the UI thread to access the current window.
+    let ns_view: &NSView = unsafe { &*handle.ns_view.as_ptr().cast::<NSView>() };
+    let ns_window = ns_view
+        .window()
+        .ok_or_else(|| "NSView is not attached to an NSWindow yet".to_owned())?;
+
+    Ok(f(&ns_window))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowProfile {
+    Normal,
+    Overlay,
+}
+
+#[cfg(target_os = "macos")]
+fn current_window_diagnostics(
+    frame: &eframe::Frame,
+) -> Result<
+    (
+        bool,
+        i64,
+        NSWindowAnimationBehavior,
+        NSWindowCollectionBehavior,
+        NSWindowStyleMask,
+        bool,
+        bool,
+        bool,
+        bool,
+        bool,
+    ),
+    String,
+> {
+    with_ns_window(frame, |ns_window| {
+        (
+            MainThreadMarker::new().is_some(),
+            ns_window.level() as i64,
+            ns_window.animationBehavior(),
+            ns_window.collectionBehavior(),
+            ns_window.styleMask(),
+            ns_window.hidesOnDeactivate(),
+            ns_window.canBecomeKeyWindow(),
+            ns_window.canBecomeMainWindow(),
+            ns_window.ignoresMouseEvents(),
+            ns_window.hasShadow(),
+        )
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn apply_window_profile(frame: &eframe::Frame, profile: WindowProfile) -> Result<(), String> {
+    with_ns_window(frame, |ns_window| match profile {
+        WindowProfile::Normal => {
+            ns_window.setLevel(NSNormalWindowLevel);
+            ns_window.setAnimationBehavior(NSWindowAnimationBehavior::Default);
+            ns_window.setHidesOnDeactivate(false);
+            ns_window.setHasShadow(true);
+            ns_window.setCollectionBehavior(NSWindowCollectionBehavior::Default);
+            ns_window.setStyleMask(
+                NSWindowStyleMask::Titled
+                    | NSWindowStyleMask::Closable
+                    | NSWindowStyleMask::Miniaturizable
+                    | NSWindowStyleMask::Resizable,
+            );
+        }
+        WindowProfile::Overlay => {
+            ns_window.setLevel(NSPopUpMenuWindowLevel);
+            ns_window.setAnimationBehavior(NSWindowAnimationBehavior::UtilityWindow);
+            ns_window.setHidesOnDeactivate(false);
+            ns_window.setHasShadow(false);
+            ns_window.setCollectionBehavior(
+                NSWindowCollectionBehavior::CanJoinAllApplications
+                    | NSWindowCollectionBehavior::CanJoinAllSpaces
+                    | NSWindowCollectionBehavior::FullScreenAuxiliary
+                    | NSWindowCollectionBehavior::IgnoresCycle,
+            );
+            ns_window.setStyleMask(
+                NSWindowStyleMask::Borderless
+                    | NSWindowStyleMask::NonactivatingPanel
+                    | NSWindowStyleMask::FullSizeContentView,
+            );
+            ns_window.orderFrontRegardless();
+        }
+    })?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn set_mouse_passthrough(frame: &eframe::Frame, enabled: bool) -> Result<(), String> {
+    with_ns_window(frame, |ns_window| {
+        ns_window.setIgnoresMouseEvents(enabled);
+    })?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn format_window_diagnostics(
+    on_main_thread: bool,
+    level: i64,
+    animation: NSWindowAnimationBehavior,
+    behavior: NSWindowCollectionBehavior,
+    style_mask: NSWindowStyleMask,
+    hides_on_deactivate: bool,
+    can_become_key: bool,
+    can_become_main: bool,
+    ignores_mouse_events: bool,
+    has_shadow: bool,
+) -> String {
+    format!(
+        "main_thread={on_main_thread}, level={level}, animation={animation:?}, aux={}, all_spaces={}, all_apps={}, ignores_cycle={}, nonactivating={}, borderless={}, shadow={has_shadow}, hides_on_deactivate={hides_on_deactivate}, can_key={can_become_key}, can_main={can_become_main}, click_through={ignores_mouse_events}, behavior_raw=0x{:x}, style_raw=0x{:x}, flags={behavior:?}",
+        behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary),
+        behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces),
+        behavior.contains(NSWindowCollectionBehavior::CanJoinAllApplications),
+        behavior.contains(NSWindowCollectionBehavior::IgnoresCycle),
+        style_mask.contains(NSWindowStyleMask::NonactivatingPanel),
+        !style_mask.contains(NSWindowStyleMask::Titled),
+        behavior.bits()
+        ,
+        style_mask.bits()
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SourceMode {
@@ -77,6 +222,9 @@ pub struct SoundHearingAidApp {
     last_tick: Instant,
     latest_energies: ChannelEnergies,
     latest_frame: DirectionFrame,
+    overlay_mode: bool,
+    click_through_mode: bool,
+    window_collection_behavior_debug: String,
 }
 
 impl SoundHearingAidApp {
@@ -88,6 +236,9 @@ impl SoundHearingAidApp {
             last_tick: Instant::now(),
             latest_energies: ChannelEnergies::default(),
             latest_frame: DirectionFrame::empty(),
+            overlay_mode: false,
+            click_through_mode: false,
+            window_collection_behavior_debug: "not queried yet".to_owned(),
         }
     }
 
@@ -115,6 +266,82 @@ impl SoundHearingAidApp {
         self.pipeline.set_layout(self.source.layout());
         self.latest_energies = ChannelEnergies::default();
         self.latest_frame = DirectionFrame::empty();
+    }
+
+    fn set_overlay_mode(&mut self, ctx: &egui::Context, frame: &eframe::Frame, enabled: bool) {
+        self.overlay_mode = enabled;
+        if !enabled {
+            self.click_through_mode = false;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!enabled));
+        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(if enabled {
+            egui::viewport::WindowLevel::AlwaysOnTop
+        } else {
+            egui::viewport::WindowLevel::Normal
+        }));
+        #[cfg(target_os = "macos")]
+        if let Err(err) = apply_window_profile(
+            frame,
+            if enabled {
+                WindowProfile::Overlay
+            } else {
+                WindowProfile::Normal
+            },
+        ) {
+            eprintln!("failed to apply window profile: {err}");
+        }
+        #[cfg(target_os = "macos")]
+        if let Err(err) = set_mouse_passthrough(frame, enabled && self.click_through_mode) {
+            eprintln!("failed to update click-through mode: {err}");
+        }
+        self.refresh_window_debug_info(frame);
+    }
+
+    fn set_click_through_mode(&mut self, frame: &eframe::Frame, enabled: bool) {
+        self.click_through_mode = enabled;
+        #[cfg(target_os = "macos")]
+        if let Err(err) = set_mouse_passthrough(frame, self.overlay_mode && enabled) {
+            eprintln!("failed to update click-through mode: {err}");
+        }
+        self.refresh_window_debug_info(frame);
+    }
+
+    fn refresh_window_debug_info(&mut self, frame: &eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        {
+            self.window_collection_behavior_debug = match current_window_diagnostics(frame) {
+                Ok((
+                    on_main_thread,
+                    level,
+                    animation,
+                    behavior,
+                    style_mask,
+                    hides_on_deactivate,
+                    can_become_key,
+                    can_become_main,
+                    ignores_mouse_events,
+                    has_shadow,
+                )) => format_window_diagnostics(
+                    on_main_thread,
+                    level,
+                    animation,
+                    behavior,
+                    style_mask,
+                    hides_on_deactivate,
+                    can_become_key,
+                    can_become_main,
+                    ignores_mouse_events,
+                    has_shadow,
+                ),
+                Err(err) => format!("unavailable: {err}"),
+            };
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = frame;
+            self.window_collection_behavior_debug = "not available on this platform".to_owned();
+        }
     }
 
     fn source_state_message(state: &AudioSourceState) -> String {
@@ -149,13 +376,18 @@ impl SoundHearingAidApp {
 }
 
 impl eframe::App for SoundHearingAidApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let now = Instant::now();
         let dt = (now - self.last_tick).as_secs_f32().max(1.0 / 240.0);
         self.last_tick = now;
 
+        if self.click_through_mode && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.set_click_through_mode(frame, false);
+        }
+
         self.latest_energies = self.source.next_energies(dt);
         self.latest_frame = self.pipeline.update(&self.latest_energies);
+        self.refresh_window_debug_info(frame);
 
         let source_state = self.source.state();
         let source_mode = self.source.mode();
@@ -164,6 +396,30 @@ impl eframe::App for SoundHearingAidApp {
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Sound Hearing Aid");
+                ui.separator();
+
+                let overlay_label = if self.overlay_mode {
+                    "Exit overlay"
+                } else {
+                    "Overlay"
+                };
+                if ui.button(overlay_label).clicked() {
+                    self.set_overlay_mode(ctx, frame, !self.overlay_mode);
+                }
+                if self.overlay_mode {
+                    let click_through_label = if self.click_through_mode {
+                        "Interactive"
+                    } else {
+                        "Click-through"
+                    };
+                    if ui.button(click_through_label).clicked() {
+                        self.set_click_through_mode(frame, !self.click_through_mode);
+                    }
+                }
+                if self.overlay_mode && ui.button("Drag").clicked() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+
                 ui.separator();
 
                 ui.label("Source:");
@@ -243,6 +499,21 @@ impl eframe::App for SoundHearingAidApp {
                                 Self::source_state_message(&source_state)
                             ));
                             ui.label(Self::source_help_text(source_mode, &source_state));
+
+                            ui.add_space(16.0);
+                            ui.heading("Window diagnostics");
+                            ui.label(format!(
+                                "Overlay mode: {}",
+                                if self.overlay_mode { "On" } else { "Off" }
+                            ));
+                            ui.label(format!(
+                                "Click-through mode: {}",
+                                if self.click_through_mode { "On" } else { "Off" }
+                            ));
+                            ui.label(format!(
+                                "Collection behavior: {}",
+                                self.window_collection_behavior_debug
+                            ));
 
                             ui.add_space(16.0);
                             ui.heading("Current channel energies");

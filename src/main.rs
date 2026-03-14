@@ -1,26 +1,41 @@
-mod app;
 mod estimators;
 mod pipeline;
+mod platform;
+mod runtime;
 mod smoothing;
 mod source;
 mod types;
 mod ui;
 
-use eframe::egui;
+use gpui::{App, ReadGlobal};
 
-use crate::app::SoundHearingAidApp;
+use crate::{
+    runtime::RadarRuntime,
+    ui::{options_window::OptionsWindow, overlay_window::OverlayWindow},
+};
 
-fn main() -> eframe::Result<()> {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([980.0, 640.0])
-            .with_min_inner_size([720.0, 480.0]),
-        ..Default::default()
-    };
+const APP_IDENTIFIER: &str = "com.pk.sound-radar";
 
-    eframe::run_native(
-        "Sound Hearing Aid",
-        options,
-        Box::new(|cc| Ok(Box::new(SoundHearingAidApp::new(cc)))),
-    )
+fn setup(cx: &mut App) {
+    RadarRuntime::register_global(cx);
+    OverlayWindow::register_global(cx);
+    OptionsWindow::register_global(cx);
+
+    cx.on_window_closed(move |cx| {
+        let no_options_window = cx
+            .windows()
+            .iter()
+            .all(|handle| handle.window_id() != OptionsWindow::global(cx).handle().window_id());
+
+        if no_options_window {
+            cx.quit();
+        }
+    })
+    .detach();
+
+    cx.activate(true);
+}
+
+fn main() {
+    gpui::Application::new().run(setup);
 }
