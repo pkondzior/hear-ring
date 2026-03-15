@@ -59,6 +59,12 @@ pub struct ScreenCaptureSource {
     _stream: Option<SCStream>,
 }
 
+struct StreamErrorHandler {
+    shared: Arc<Mutex<SharedCaptureState>>,
+}
+
+struct NoopScreenHandler;
+
 impl ScreenCaptureSource {
     pub fn new() -> Self {
         let shared = Arc::new(Mutex::new(SharedCaptureState::default()));
@@ -97,15 +103,25 @@ impl ScreenCaptureSource {
             .build();
 
         let config = SCStreamConfiguration::new()
-            .with_width(display.width())
-            .with_height(display.height())
+            .with_width(1)
+            .with_height(1)
+            .with_pixel_format(PixelFormat::BGRA)
+            .with_fps(1)
             .with_captures_audio(true)
+            .with_excludes_current_process_audio(true)
             .with_sample_rate(48_000)
             .with_channel_count(2);
 
-        let mut stream = SCStream::new(&filter, &config);
+        let mut stream = SCStream::new_with_delegate(
+            &filter,
+            &config,
+            StreamErrorHandler {
+                shared: shared.clone(),
+            },
+        );
         let handler = AudioCaptureHandler { shared };
 
+        stream.add_output_handler(NoopScreenHandler, SCStreamOutputType::Screen);
         stream.add_output_handler(handler, SCStreamOutputType::Audio);
         stream.start_capture().map_err(Self::map_error)?;
 
@@ -150,6 +166,27 @@ impl AudioSource for ScreenCaptureSource {
             .map(|guard| guard.state.clone())
             .unwrap_or_else(|_| AudioSourceState::Error("Capture state lock poisoned".to_owned()))
     }
+}
+
+impl SCStreamDelegateTrait for StreamErrorHandler {
+    fn did_stop_with_error(&self, error: SCError) {
+        if let Ok(mut guard) = self.shared.lock() {
+            guard.state =
+                AudioSourceState::Error(format!("ScreenCaptureKit stream error: {error}"));
+        }
+    }
+
+    fn stream_did_stop(&self, error: Option<String>) {
+        if let Ok(mut guard) = self.shared.lock() {
+            guard.state = AudioSourceState::Error(
+                error.unwrap_or_else(|| "ScreenCaptureKit stream stopped".to_owned()),
+            );
+        }
+    }
+}
+
+impl SCStreamOutputTrait for NoopScreenHandler {
+    fn did_output_sample_buffer(&self, _sample: CMSampleBuffer, _type: SCStreamOutputType) {}
 }
 
 struct AudioCaptureHandler {

@@ -32,9 +32,9 @@ impl StereoEstimator {
 
     pub fn new() -> Self {
         Self {
-            min_energy: 0.0,
-            max_energy: 2.5,
-            pan_gain: 1.6,
+            min_energy: 0.04,
+            max_energy: 0.35,
+            pan_gain: 0.65,
             smoothed_pan: 0.0,
         }
     }

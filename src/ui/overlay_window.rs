@@ -11,6 +11,8 @@ pub struct OverlayWindow {
 impl Global for OverlayWindow {}
 
 impl OverlayWindow {
+    const WINDOW_SIZE: f32 = 420.0 / 3.0;
+
     pub fn register_global(cx: &mut App) {
         let handle = Self::setup_window(cx);
         let overlay = Self {
@@ -23,7 +25,8 @@ impl OverlayWindow {
     }
 
     fn setup_window(cx: &mut App) -> AnyWindowHandle {
-        let bounds = gpui::Bounds::centered(None, size(px(420.), px(420.)), cx);
+        let bounds =
+            gpui::Bounds::centered(None, size(px(Self::WINDOW_SIZE), px(Self::WINDOW_SIZE)), cx);
         let window_options = gpui::WindowOptions {
             titlebar: None,
             kind: gpui::WindowKind::PopUp,
