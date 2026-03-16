@@ -7,7 +7,7 @@ use gpui::{
 
 use crate::{
     runtime::RadarRuntime,
-    types::{DirectionFrame, ORDERED_SECTORS},
+    types::{Direction, DirectionFrame},
 };
 
 const SECTOR_HALF_SPAN: f32 = TAU / 16.0;
@@ -78,10 +78,10 @@ fn paint_radar_ring(
     frame: &DirectionFrame,
     window: &mut Window,
 ) {
-    for sector in ORDERED_SECTORS {
-        let fill_strength = frame.scores[sector.index()].clamp(0.0, 1.0);
-        let start = sector.angle() - SECTOR_HALF_SPAN;
-        let end = sector.angle() + SECTOR_HALF_SPAN;
+    for direction in Direction::ALL {
+        let fill_strength = frame.scores[direction].clamp(0.0, 1.0);
+        let start = direction.angle() - SECTOR_HALF_SPAN;
+        let end = direction.angle() + SECTOR_HALF_SPAN;
 
         if let Some(path) = ring_segment_path(layout, start, end) {
             window.paint_path(path, segment_fill(fill_strength));

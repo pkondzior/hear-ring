@@ -1,7 +1,7 @@
 use std::f32::consts::{PI, TAU};
 
 use super::AudioSource;
-use crate::types::{ChannelEnergies, ChannelLayout, Sector8};
+use crate::types::{ChannelEnergies, ChannelLayout, Direction};
 
 /// Generate demo channel energy so the UI and estimator path can be tested
 /// before real loopback capture is wired in.
@@ -46,29 +46,29 @@ impl AudioSource for DemoSource {
 
         match self.layout {
             ChannelLayout::Stereo => {
-                let left = self.directional_blob(source_angle, Sector8::FL.angle(), PI * 0.80)
-                    + self.directional_blob(source_angle, Sector8::L.angle(), PI * 0.65) * 0.35;
-                let right = self.directional_blob(source_angle, Sector8::FR.angle(), PI * 0.80)
-                    + self.directional_blob(source_angle, Sector8::R.angle(), PI * 0.65) * 0.35;
+                let left = self.directional_blob(source_angle, Direction::FL.angle(), PI * 0.80)
+                    + self.directional_blob(source_angle, Direction::L.angle(), PI * 0.65) * 0.35;
+                let right = self.directional_blob(source_angle, Direction::FR.angle(), PI * 0.80)
+                    + self.directional_blob(source_angle, Direction::R.angle(), PI * 0.65) * 0.35;
 
                 energies.fl = loudness * left;
                 energies.fr = loudness * right;
             }
             ChannelLayout::Surround71 => {
-                energies.fl =
-                    loudness * self.directional_blob(source_angle, Sector8::FL.angle(), PI * 0.55);
-                energies.fr =
-                    loudness * self.directional_blob(source_angle, Sector8::FR.angle(), PI * 0.55);
+                energies.fl = loudness
+                    * self.directional_blob(source_angle, Direction::FL.angle(), PI * 0.55);
+                energies.fr = loudness
+                    * self.directional_blob(source_angle, Direction::FR.angle(), PI * 0.55);
                 energies.c =
-                    loudness * self.directional_blob(source_angle, Sector8::F.angle(), PI * 0.55);
+                    loudness * self.directional_blob(source_angle, Direction::F.angle(), PI * 0.55);
                 energies.sl =
-                    loudness * self.directional_blob(source_angle, Sector8::L.angle(), PI * 0.55);
+                    loudness * self.directional_blob(source_angle, Direction::L.angle(), PI * 0.55);
                 energies.sr =
-                    loudness * self.directional_blob(source_angle, Sector8::R.angle(), PI * 0.55);
-                energies.rl =
-                    loudness * self.directional_blob(source_angle, Sector8::BL.angle(), PI * 0.55);
-                energies.rr =
-                    loudness * self.directional_blob(source_angle, Sector8::BR.angle(), PI * 0.55);
+                    loudness * self.directional_blob(source_angle, Direction::R.angle(), PI * 0.55);
+                energies.rl = loudness
+                    * self.directional_blob(source_angle, Direction::BL.angle(), PI * 0.55);
+                energies.rr = loudness
+                    * self.directional_blob(source_angle, Direction::BR.angle(), PI * 0.55);
                 energies.lfe = loudness * 0.18;
             }
         }

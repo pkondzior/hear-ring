@@ -1,5 +1,5 @@
 use crate::estimators::DirectionEstimator;
-use crate::types::{ChannelEnergies, DirectionFrame, Sector8, SECTOR_COUNT};
+use crate::types::{ChannelEnergies, Direction, DirectionFrame, DirectionScores};
 
 pub struct Surround71Estimator {
     min_energy: f32,
@@ -22,54 +22,50 @@ impl DirectionEstimator for Surround71Estimator {
             return DirectionFrame::empty();
         }
 
-        let mut scores = [0.0; SECTOR_COUNT];
+        let mut scores = DirectionScores::default();
 
-        scores[Sector8::F.index()] += 0.80 * energies.c;
-        scores[Sector8::FL.index()] += 0.10 * energies.c;
-        scores[Sector8::FR.index()] += 0.10 * energies.c;
+        scores[Direction::F] += 0.80 * energies.c;
+        scores[Direction::FL] += 0.10 * energies.c;
+        scores[Direction::FR] += 0.10 * energies.c;
 
-        scores[Sector8::FL.index()] += 0.80 * energies.fl;
-        scores[Sector8::F.index()] += 0.10 * energies.fl;
-        scores[Sector8::L.index()] += 0.10 * energies.fl;
+        scores[Direction::FL] += 0.80 * energies.fl;
+        scores[Direction::F] += 0.10 * energies.fl;
+        scores[Direction::L] += 0.10 * energies.fl;
 
-        scores[Sector8::FR.index()] += 0.80 * energies.fr;
-        scores[Sector8::F.index()] += 0.10 * energies.fr;
-        scores[Sector8::R.index()] += 0.10 * energies.fr;
+        scores[Direction::FR] += 0.80 * energies.fr;
+        scores[Direction::F] += 0.10 * energies.fr;
+        scores[Direction::R] += 0.10 * energies.fr;
 
-        scores[Sector8::L.index()] += 0.80 * energies.sl;
-        scores[Sector8::FL.index()] += 0.10 * energies.sl;
-        scores[Sector8::BL.index()] += 0.10 * energies.sl;
+        scores[Direction::L] += 0.80 * energies.sl;
+        scores[Direction::FL] += 0.10 * energies.sl;
+        scores[Direction::BL] += 0.10 * energies.sl;
 
-        scores[Sector8::R.index()] += 0.80 * energies.sr;
-        scores[Sector8::FR.index()] += 0.10 * energies.sr;
-        scores[Sector8::BR.index()] += 0.10 * energies.sr;
+        scores[Direction::R] += 0.80 * energies.sr;
+        scores[Direction::FR] += 0.10 * energies.sr;
+        scores[Direction::BR] += 0.10 * energies.sr;
 
-        scores[Sector8::BL.index()] += 0.80 * energies.rl;
-        scores[Sector8::L.index()] += 0.10 * energies.rl;
-        scores[Sector8::B.index()] += 0.10 * energies.rl;
+        scores[Direction::BL] += 0.80 * energies.rl;
+        scores[Direction::L] += 0.10 * energies.rl;
+        scores[Direction::B] += 0.10 * energies.rl;
 
-        scores[Sector8::BR.index()] += 0.80 * energies.rr;
-        scores[Sector8::R.index()] += 0.10 * energies.rr;
-        scores[Sector8::B.index()] += 0.10 * energies.rr;
+        scores[Direction::BR] += 0.80 * energies.rr;
+        scores[Direction::R] += 0.10 * energies.rr;
+        scores[Direction::B] += 0.10 * energies.rr;
 
-        scores[Sector8::B.index()] += 0.25 * energies.rl.min(energies.rr);
+        scores[Direction::B] += 0.25 * energies.rl.min(energies.rr);
 
         let gate = ((directional_total - self.min_energy) / (self.max_energy - self.min_energy))
             .clamp(0.0, 1.0);
 
-        let sum: f32 = scores.iter().sum::<f32>().max(1e-6);
-        for score in &mut scores {
+        let sum: f32 = scores.iter().copied().sum::<f32>().max(1e-6);
+        for score in scores.iter_mut() {
             *score = (*score / sum) * gate;
         }
 
-        let left_sum =
-            scores[Sector8::FL.index()] + scores[Sector8::L.index()] + scores[Sector8::BL.index()];
-        let right_sum =
-            scores[Sector8::FR.index()] + scores[Sector8::R.index()] + scores[Sector8::BR.index()];
-        let front_sum =
-            scores[Sector8::FL.index()] + scores[Sector8::F.index()] + scores[Sector8::FR.index()];
-        let rear_sum =
-            scores[Sector8::BL.index()] + scores[Sector8::B.index()] + scores[Sector8::BR.index()];
+        let left_sum = scores[Direction::FL] + scores[Direction::L] + scores[Direction::BL];
+        let right_sum = scores[Direction::FR] + scores[Direction::R] + scores[Direction::BR];
+        let front_sum = scores[Direction::FL] + scores[Direction::F] + scores[Direction::FR];
+        let rear_sum = scores[Direction::BL] + scores[Direction::B] + scores[Direction::BR];
 
         let lateral_separation = (left_sum - right_sum).abs();
         let depth_separation = (front_sum - rear_sum).abs();

@@ -1,12 +1,13 @@
 use gpui::{
-    div, prelude::*, px, relative, rgb, App, Context, ReadGlobal, Render, SharedString,
+    div, prelude::*, px, relative, rgb, App, Context, Entity, ReadGlobal, Render, SharedString,
     UpdateGlobal, Window,
 };
+use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 
 use crate::{
     runtime::{RadarRuntime, SourceMode},
     source::AudioSourceState,
-    types::{ChannelLayout, Sector8, ORDERED_SECTORS},
+    types::{ChannelLayout, Direction, EnergyChannel},
     ui::overlay_window::OverlayWindow,
 };
 
@@ -31,6 +32,7 @@ fn action_button(
 ) -> impl IntoElement {
     div()
         .id(id)
+        .mt_20()
         .px_3()
         .py_2()
         .rounded_sm()
@@ -150,17 +152,16 @@ fn meter_row(id: &str, label: &str, value: f32) -> impl IntoElement {
         .id(SharedString::from(id.to_owned()))
         .flex()
         .items_center()
-        .gap_2()
+        .gap_1()
         .child(
             div()
-                .w(px(64.))
                 .text_sm()
                 .text_color(rgb(0xbdbdbd))
                 .child(label.to_owned()),
         )
         .child(
             div()
-                .w(px(180.))
+                .w(px(100.))
                 .h(px(12.))
                 .rounded_sm()
                 .bg(rgb(0x101010))
@@ -176,31 +177,72 @@ fn meter_row(id: &str, label: &str, value: f32) -> impl IntoElement {
         )
         .child(
             div()
-                .w(px(44.))
                 .text_sm()
                 .text_color(rgb(0xe5e5e5))
                 .child(format!("{:>3}%", (fill * 100.0).round() as i32)),
         )
 }
 
-fn tune_row(
-    base_id: &'static str,
+struct TuningSliderState {
+    slider: Entity<SliderState>,
+    _subscription: gpui::Subscription,
+}
+
+fn tune_slider_row(
+    slider_id: &'static str,
     label: &str,
     value: f32,
-    minus: impl Fn(&mut Window, &mut App) + 'static,
-    plus: impl Fn(&mut Window, &mut App) + 'static,
+    min: f32,
+    max: f32,
+    step: f32,
+    window: &mut Window,
+    cx: &mut Context<OptionsView>,
+    on_change: fn(&mut RadarRuntime, f32),
 ) -> impl IntoElement {
+    let slider = {
+        let on_change = on_change;
+        let state = window
+            .use_keyed_state(slider_id, cx, |_, cx| {
+                let slider = cx.new(|_| {
+                    SliderState::new()
+                        .min(min)
+                        .max(max)
+                        .step(step)
+                        .default_value(value)
+                });
+                let _subscription = cx.subscribe(&slider, move |_, _, event: &SliderEvent, cx| {
+                    if let SliderEvent::Change(SliderValue::Single(value)) = event {
+                        RadarRuntime::update_global(cx, |runtime, _| on_change(runtime, *value));
+                    }
+                });
+
+                TuningSliderState {
+                    slider,
+                    _subscription,
+                }
+            })
+            .read(cx);
+
+        state.slider.clone()
+    };
+
+    slider.update(cx, |state, cx| {
+        if state.value() != SliderValue::Single(value) {
+            state.set_value(value, window, cx);
+        }
+    });
+
     div()
         .flex()
         .items_center()
-        .gap_2()
+        .gap_3()
         .child(
             div()
                 .w(px(160.))
                 .text_color(rgb(0xbdbdbd))
                 .child(label.to_owned()),
         )
-        .child(action_button((base_id, 0usize), "-", minus))
+        .child(Slider::new(&slider).w(px(220.)).h(px(24.)))
         .child(
             div()
                 .w(px(72.))
@@ -213,11 +255,10 @@ fn tune_row(
                 .text_color(rgb(0xf4f4f4))
                 .child(format!("{value:.3}")),
         )
-        .child(action_button((base_id, 1usize), "+", plus))
 }
 
 impl Render for OptionsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let runtime = RadarRuntime::global(cx).snapshot();
         let tuning = RadarRuntime::global(cx).tuning();
         let overlay_visible = OverlayWindow::global(cx).is_visible();
@@ -230,283 +271,310 @@ impl Render for OptionsView {
                 .flex()
                 .flex_col()
                 .gap_3()
-                .p_4()
-                .id("options-scroll")
-                .overflow_y_scroll()
+                .px_4()
+                .pb_4()
+                .pt(px(60.))
                 .text_color(rgb(0xf4f4f4))
                 .child(div().text_xl().child("Sound Radar"))
-                .child(section(
-                    "Source",
+                .child(
                     div()
+                        .id("options-scroll")
+                        .flex_1()
                         .flex()
                         .flex_col()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .items_center()
-                                .child(chip(
-                                    "source-demo",
-                                    "Demo",
-                                    runtime.source_mode == SourceMode::Demo,
-                                    false,
-                                    |_window, cx| {
-                                        RadarRuntime::update_global(cx, |runtime, _| {
-                                            runtime.set_source_mode(SourceMode::Demo);
-                                        });
-                                    },
-                                ))
-                                .child(chip(
-                                    "source-system",
-                                    "System Audio",
-                                    runtime.source_mode == SourceMode::SystemAudio,
-                                    false,
-                                    |_window, cx| {
-                                        RadarRuntime::update_global(cx, |runtime, _| {
-                                            runtime.set_source_mode(SourceMode::SystemAudio);
-                                        });
-                                    },
-                                )),
-                        )
-                        .child(info_row(
-                            "State",
-                            source_state_message(&runtime.source_state),
-                        ))
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(rgb(0xbdbdbd))
-                                .child(source_help_text(
-                                    runtime.source_mode,
-                                    &runtime.source_state,
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .items_center()
-                                .child(chip(
-                                    "layout-stereo",
-                                    "Stereo",
-                                    runtime.layout == ChannelLayout::Stereo,
-                                    layout_locked,
-                                    |_window, cx| {
-                                        RadarRuntime::update_global(cx, |runtime, _| {
-                                            runtime.set_layout(ChannelLayout::Stereo);
-                                        });
-                                    },
-                                ))
-                                .child(chip(
-                                    "layout-surround",
-                                    "7.1",
-                                    runtime.layout == ChannelLayout::Surround71,
-                                    layout_locked,
-                                    |_window, cx| {
-                                        RadarRuntime::update_global(cx, |runtime, _| {
-                                            runtime.set_layout(ChannelLayout::Surround71);
-                                        });
-                                    },
-                                ))
-                                .when(layout_locked, |this| {
-                                    this.child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(rgb(0x9ca3af))
-                                            .child("(fixed by source)"),
-                                    )
-                                }),
-                        ),
-                ))
-                .child(section(
-                    "Overlay",
-                    div().flex().flex_col().gap_2().child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(action_button(
-                                "toggle-overlay",
-                                if overlay_visible {
-                                    "Hide overlay"
-                                } else {
-                                    "Show overlay"
-                                },
-                                |_window, cx| {
-                                    OverlayWindow::update_global(cx, |overlay, cx| {
-                                        overlay.set_visible(cx, !overlay.is_visible());
-                                    });
-                                },
-                            ))
-                            .child(action_button(
-                                "toggle-click-through",
-                                if click_through {
-                                    "Draggable"
-                                } else {
-                                    "Click-through"
-                                },
-                                |_window, cx| {
-                                    OverlayWindow::update_global(cx, |overlay, cx| {
-                                        overlay.set_click_through(cx, !overlay.click_through());
-                                    });
-                                },
-                            )),
-                    ),
-                ))
-                .child(section(
-                    "Tuning",
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(tune_row(
-                            "stereo-min-energy",
-                            "Stereo min energy",
-                            tuning.stereo.min_energy,
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_stereo_min_energy(-0.01);
-                                });
-                            },
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_stereo_min_energy(0.01);
-                                });
-                            },
-                        ))
-                        .child(tune_row(
-                            "stereo-max-energy",
-                            "Stereo max energy",
-                            tuning.stereo.max_energy,
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_stereo_max_energy(-0.05);
-                                });
-                            },
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_stereo_max_energy(0.05);
-                                });
-                            },
-                        ))
-                        .child(tune_row(
-                            "stereo-pan-gain",
-                            "Stereo pan gain",
-                            tuning.stereo.pan_gain,
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_stereo_pan_gain(-0.05);
-                                });
-                            },
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_stereo_pan_gain(0.05);
-                                });
-                            },
-                        ))
-                        .child(tune_row(
-                            "smoother-attack",
-                            "Attack",
-                            tuning.smoother.attack_alpha,
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_attack(-0.01);
-                                });
-                            },
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_attack(0.01);
-                                });
-                            },
-                        ))
-                        .child(tune_row(
-                            "smoother-decay",
-                            "Decay",
-                            tuning.smoother.decay_alpha,
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_decay(-0.01);
-                                });
-                            },
-                            |_window, cx| {
-                                RadarRuntime::update_global(cx, |runtime, _| {
-                                    runtime.adjust_decay(0.01);
-                                });
-                            },
-                        )),
-                ))
-                .child(section(
-                    "Diagnostics",
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(info_row("Input mode", runtime.layout.label()))
-                        .child(meter_row(
-                            "energy-fl",
-                            "FL / L",
-                            runtime.latest_energies.fl.max(runtime.latest_energies.sl),
-                        ))
-                        .child(meter_row(
-                            "energy-fr",
-                            "FR / R",
-                            runtime.latest_energies.fr.max(runtime.latest_energies.sr),
-                        ))
-                        .child(meter_row("energy-c", "C", runtime.latest_energies.c))
-                        .child(meter_row("energy-sl", "SL", runtime.latest_energies.sl))
-                        .child(meter_row("energy-sr", "SR", runtime.latest_energies.sr))
-                        .child(meter_row("energy-rl", "RL", runtime.latest_energies.rl))
-                        .child(meter_row("energy-rr", "RR", runtime.latest_energies.rr))
-                        .child(meter_row("energy-lfe", "LFE", runtime.latest_energies.lfe))
-                        .children(matches!(runtime.layout, ChannelLayout::Stereo).then(|| {
+                        .gap_3()
+                        .overflow_y_scroll()
+                        .child(section(
+                            "Source",
                             div()
                                 .flex()
                                 .flex_col()
-                                .gap_1()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .items_center()
+                                        .child(chip(
+                                            "source-demo",
+                                            "Demo",
+                                            runtime.source_mode == SourceMode::Demo,
+                                            false,
+                                            |_window, cx| {
+                                                RadarRuntime::update_global(cx, |runtime, _| {
+                                                    runtime.set_source_mode(SourceMode::Demo);
+                                                });
+                                            },
+                                        ))
+                                        .child(chip(
+                                            "source-system",
+                                            "System Audio",
+                                            runtime.source_mode == SourceMode::SystemAudio,
+                                            false,
+                                            |_window, cx| {
+                                                RadarRuntime::update_global(cx, |runtime, _| {
+                                                    runtime
+                                                        .set_source_mode(SourceMode::SystemAudio);
+                                                });
+                                            },
+                                        )),
+                                )
                                 .child(info_row(
-                                    "Pan",
-                                    format!("{:+.2}", runtime.latest_energies.stereo_pan),
+                                    "State",
+                                    source_state_message(&runtime.source_state),
                                 ))
-                                .child(info_row(
-                                    "Smoothed pan",
-                                    format!("{:+.2}", runtime.stereo_smoothed_pan),
+                                .child(div().text_sm().text_color(rgb(0xbdbdbd)).child(
+                                    source_help_text(runtime.source_mode, &runtime.source_state),
                                 ))
-                                .child(info_row(
-                                    "Width",
-                                    format!("{:.2}", runtime.latest_energies.stereo_width),
-                                ))
-                        }))
-                        .child(info_row(
-                            "Dominant sector",
-                            runtime
-                                .latest_frame
-                                .dominant_sector()
-                                .map(Sector8::label)
-                                .unwrap_or("-"),
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .items_center()
+                                        .child(chip(
+                                            "layout-stereo",
+                                            "Stereo",
+                                            runtime.layout == ChannelLayout::Stereo,
+                                            layout_locked,
+                                            |_window, cx| {
+                                                RadarRuntime::update_global(cx, |runtime, _| {
+                                                    runtime.set_layout(ChannelLayout::Stereo);
+                                                });
+                                            },
+                                        ))
+                                        .child(chip(
+                                            "layout-surround",
+                                            "7.1",
+                                            runtime.layout == ChannelLayout::Surround71,
+                                            layout_locked,
+                                            |_window, cx| {
+                                                RadarRuntime::update_global(cx, |runtime, _| {
+                                                    runtime.set_layout(ChannelLayout::Surround71);
+                                                });
+                                            },
+                                        ))
+                                        .when(layout_locked, |this| {
+                                            this.child(
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(rgb(0x9ca3af))
+                                                    .child("(fixed by source)"),
+                                            )
+                                        }),
+                                ),
                         ))
-                        .child(info_row(
-                            "Confidence",
-                            format!("{:.2}", runtime.latest_frame.confidence),
+                        .child(section(
+                            "Overlay",
+                            div().flex().flex_col().gap_2().child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(action_button(
+                                        "toggle-overlay",
+                                        if overlay_visible {
+                                            "Hide overlay"
+                                        } else {
+                                            "Show overlay"
+                                        },
+                                        |_window, cx| {
+                                            OverlayWindow::update_global(cx, |overlay, cx| {
+                                                overlay.set_visible(cx, !overlay.is_visible());
+                                            });
+                                        },
+                                    ))
+                                    .child(action_button(
+                                        "toggle-click-through",
+                                        if click_through {
+                                            "Draggable"
+                                        } else {
+                                            "Click-through"
+                                        },
+                                        |_window, cx| {
+                                            OverlayWindow::update_global(cx, |overlay, cx| {
+                                                overlay.set_click_through(
+                                                    cx,
+                                                    !overlay.click_through(),
+                                                );
+                                            });
+                                        },
+                                    )),
+                            ),
                         ))
-                        .child(info_row(
-                            "Intensity",
-                            format!("{:.2}", runtime.latest_frame.intensity),
+                        .child(section(
+                            "Tuning",
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(tune_slider_row(
+                                    "stereo-min-energy-slider",
+                                    "Stereo min energy",
+                                    tuning.stereo.min_energy,
+                                    0.0,
+                                    0.25,
+                                    0.01,
+                                    window,
+                                    cx,
+                                    RadarRuntime::set_stereo_min_energy,
+                                ))
+                                .child(tune_slider_row(
+                                    "stereo-max-energy-slider",
+                                    "Stereo max energy",
+                                    tuning.stereo.max_energy,
+                                    0.1,
+                                    2.5,
+                                    0.05,
+                                    window,
+                                    cx,
+                                    RadarRuntime::set_stereo_max_energy,
+                                ))
+                                .child(tune_slider_row(
+                                    "stereo-pan-gain-slider",
+                                    "Stereo pan gain",
+                                    tuning.stereo.pan_gain,
+                                    0.5,
+                                    4.0,
+                                    0.05,
+                                    window,
+                                    cx,
+                                    RadarRuntime::set_stereo_pan_gain,
+                                ))
+                                .child(tune_slider_row(
+                                    "smoother-attack-slider",
+                                    "Attack",
+                                    tuning.smoother.attack_alpha,
+                                    0.0,
+                                    1.0,
+                                    0.01,
+                                    window,
+                                    cx,
+                                    RadarRuntime::set_attack_alpha,
+                                ))
+                                .child(tune_slider_row(
+                                    "smoother-decay-slider",
+                                    "Decay",
+                                    tuning.smoother.decay_alpha,
+                                    0.0,
+                                    1.0,
+                                    0.01,
+                                    window,
+                                    cx,
+                                    RadarRuntime::set_decay_alpha,
+                                )),
+                        ))
+                        .child(section(
+                            "Diagnostics",
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_4()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(info_row("Input mode", runtime.layout.label()))
+                                        .children(
+                                            matches!(runtime.layout, ChannelLayout::Stereo).then(
+                                                || {
+                                                    div()
+                                                        .flex()
+                                                        .flex_col()
+                                                        .gap_1()
+                                                        .child(info_row(
+                                                            "Pan",
+                                                            format!(
+                                                                "{:+.2}",
+                                                                runtime.latest_energies.stereo_pan
+                                                            ),
+                                                        ))
+                                                        .child(info_row(
+                                                            "Smoothed pan",
+                                                            format!(
+                                                                "{:+.2}",
+                                                                runtime.stereo_smoothed_pan
+                                                            ),
+                                                        ))
+                                                        .child(info_row(
+                                                            "Width",
+                                                            format!(
+                                                                "{:.2}",
+                                                                runtime
+                                                                    .latest_energies
+                                                                    .stereo_width
+                                                            ),
+                                                        ))
+                                                },
+                                            ),
+                                        )
+                                        .child(info_row(
+                                            "Dominant direction",
+                                            runtime
+                                                .latest_frame
+                                                .dominant_direction()
+                                                .map(Direction::label)
+                                                .unwrap_or("-"),
+                                        ))
+                                        .child(info_row(
+                                            "Confidence",
+                                            format!("{:.2}", runtime.latest_frame.confidence),
+                                        ))
+                                        .child(info_row(
+                                            "Intensity",
+                                            format!("{:.2}", runtime.latest_frame.intensity),
+                                        )),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .text_color(rgb(0xf4f4f4))
+                                                        .child("Energy levels"),
+                                                )
+                                                .children(EnergyChannel::ALL.into_iter().map(
+                                                    |channel: EnergyChannel| {
+                                                        meter_row(
+                                                            channel.id(),
+                                                            channel.label(),
+                                                            channel.value(&runtime.latest_energies),
+                                                        )
+                                                    },
+                                                )),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .text_color(rgb(0xf4f4f4))
+                                                        .child("Direction scores"),
+                                                )
+                                                .children(Direction::ALL.into_iter().map(
+                                                    |direction| {
+                                                        meter_row(
+                                                            &format!("score-{}", direction.label()),
+                                                            direction.label(),
+                                                            runtime.latest_frame.scores[direction],
+                                                        )
+                                                    },
+                                                )),
+                                        ),
+                                ),
                         )),
-                ))
-                .child(section(
-                    "Sector scores",
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .children(ORDERED_SECTORS.into_iter().map(|sector| {
-                            meter_row(
-                                &format!("score-{}", sector.label()),
-                                sector.label(),
-                                runtime.latest_frame.scores[sector.index()],
-                            )
-                        })),
-                )),
+                ),
         )
     }
 }

@@ -1,12 +1,12 @@
 use crate::estimators::DirectionEstimator;
-use crate::types::{ChannelEnergies, DirectionFrame, Sector8, SECTOR_COUNT};
+use crate::types::{ChannelEnergies, Direction, DirectionFrame, DirectionScores};
 
-const STEREO_ARC: [(f32, Sector8); 5] = [
-    (-1.0, Sector8::L),
-    (-0.5, Sector8::FL),
-    (0.0, Sector8::F),
-    (0.5, Sector8::FR),
-    (1.0, Sector8::R),
+const STEREO_ARC: [(f32, Direction); 5] = [
+    (-1.0, Direction::L),
+    (-0.5, Direction::FL),
+    (0.0, Direction::F),
+    (0.5, Direction::FR),
+    (1.0, Direction::R),
 ];
 
 pub struct StereoEstimator {
@@ -20,7 +20,7 @@ pub struct StereoEstimator {
 pub struct StereoTuning {
     pub min_energy: f32,
     pub max_energy: f32,
-    /// Scales the perceived left/right balance before mapping it into sector scores.
+    /// Scales the perceived left/right balance before mapping it into direction scores.
     /// - 1.0 keeps the current behaviour.
     /// - >1.0 makes small L/R differences push toward FL/FR (and L/R) sooner.
     /// - <1.0 makes the estimator less sensitive around center.
@@ -90,26 +90,26 @@ impl DirectionEstimator for StereoEstimator {
             (pan_abs * 0.6).clamp(0.0, 1.0)
         };
 
-        let mut scores = [0.0; SECTOR_COUNT];
+        let mut scores = DirectionScores::default();
         if pan <= STEREO_ARC[0].0 {
-            scores[Sector8::L.index()] = 1.0;
+            scores[Direction::L] = 1.0;
         } else if pan >= STEREO_ARC[STEREO_ARC.len() - 1].0 {
-            scores[Sector8::R.index()] = 1.0;
+            scores[Direction::R] = 1.0;
         } else {
             for pair in STEREO_ARC.windows(2) {
-                let (start_pos, start_sector) = pair[0];
-                let (end_pos, end_sector) = pair[1];
+                let (start_pos, start_direction) = pair[0];
+                let (end_pos, end_direction) = pair[1];
 
                 if pan >= start_pos && pan <= end_pos {
                     let t = ((pan - start_pos) / (end_pos - start_pos)).clamp(0.0, 1.0);
-                    scores[start_sector.index()] = 1.0 - t;
-                    scores[end_sector.index()] = t;
+                    scores[start_direction] = 1.0 - t;
+                    scores[end_direction] = t;
                     break;
                 }
             }
         }
 
-        for score in &mut scores {
+        for score in scores.iter_mut() {
             *score *= gate;
         }
 

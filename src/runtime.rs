@@ -147,33 +147,33 @@ impl RadarRuntime {
         self.latest_frame = DirectionFrame::empty();
     }
 
-    pub fn adjust_stereo_min_energy(&mut self, delta: f32) {
+    pub fn set_stereo_min_energy(&mut self, value: f32) {
         self.update_tuning(|tuning| {
-            tuning.stereo.min_energy = (tuning.stereo.min_energy + delta).clamp(0.0, 0.25);
+            tuning.stereo.min_energy = value.clamp(0.0, 0.25);
         });
     }
 
-    pub fn adjust_stereo_max_energy(&mut self, delta: f32) {
+    pub fn set_stereo_max_energy(&mut self, value: f32) {
         self.update_tuning(|tuning| {
-            tuning.stereo.max_energy = (tuning.stereo.max_energy + delta).clamp(0.1, 2.5);
+            tuning.stereo.max_energy = value.clamp(0.1, 2.5);
         });
     }
 
-    pub fn adjust_stereo_pan_gain(&mut self, delta: f32) {
+    pub fn set_stereo_pan_gain(&mut self, value: f32) {
         self.update_tuning(|tuning| {
-            tuning.stereo.pan_gain = (tuning.stereo.pan_gain + delta).clamp(0.5, 4.0);
+            tuning.stereo.pan_gain = value.clamp(0.5, 4.0);
         });
     }
 
-    pub fn adjust_attack(&mut self, delta: f32) {
+    pub fn set_attack_alpha(&mut self, value: f32) {
         self.update_tuning(|tuning| {
-            tuning.smoother.attack_alpha = (tuning.smoother.attack_alpha + delta).clamp(0.0, 1.0);
+            tuning.smoother.attack_alpha = value.clamp(0.0, 1.0);
         });
     }
 
-    pub fn adjust_decay(&mut self, delta: f32) {
+    pub fn set_decay_alpha(&mut self, value: f32) {
         self.update_tuning(|tuning| {
-            tuning.smoother.decay_alpha = (tuning.smoother.decay_alpha + delta).clamp(0.0, 1.0);
+            tuning.smoother.decay_alpha = value.clamp(0.0, 1.0);
         });
     }
 

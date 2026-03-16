@@ -17,6 +17,7 @@ use crate::{
 const APP_IDENTIFIER: &str = "com.pk.sound-radar";
 
 fn setup(cx: &mut App) {
+    gpui_component::init(cx);
     RadarRuntime::register_global(cx);
     OverlayWindow::register_global(cx);
     OptionsWindow::register_global(cx);

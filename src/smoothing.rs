@@ -1,4 +1,4 @@
-use crate::types::{DirectionFrame, SECTOR_COUNT};
+use crate::types::DirectionFrame;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SmootherTuning {
@@ -40,9 +40,8 @@ impl DirectionSmoother {
             self.decay_alpha
         };
 
-        for i in 0..SECTOR_COUNT {
-            self.displayed.scores[i] =
-                alpha * raw.scores[i] + (1.0 - alpha) * self.displayed.scores[i];
+        for (displayed, raw) in self.displayed.scores.iter_mut().zip(raw.scores.iter()) {
+            *displayed = alpha * *raw + (1.0 - alpha) * *displayed;
         }
 
         self.displayed.confidence =
