@@ -8,6 +8,8 @@ pub trait WindowExt {
     fn set_ignore_cursor_events(&self, _ignore: bool) {}
 
     fn set_window_draggable(&self, _draggable: bool) {}
+
+    fn set_window_topmost(&self, _topmost: bool) {}
 }
 
 #[cfg(target_os = "macos")]

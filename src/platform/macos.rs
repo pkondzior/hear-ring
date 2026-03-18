@@ -24,7 +24,7 @@ const OVERLAY_WINDOW_LEVEL: NSWindowLevel = objc2_app_kit::NSPopUpMenuWindowLeve
 
 impl WindowExt for gpui::Window {
     fn setup_options_window(&self) {
-        get_ns_window(self).setLevel(OVERLAY_WINDOW_LEVEL + 1);
+        get_ns_window(self).setLevel(objc2_app_kit::NSNormalWindowLevel);
     }
 
     fn setup_overlay_window(&self) {
@@ -66,5 +66,14 @@ impl WindowExt for gpui::Window {
 
     fn set_window_draggable(&self, draggable: bool) {
         get_ns_window(self).setMovableByWindowBackground(draggable);
+    }
+
+    fn set_window_topmost(&self, topmost: bool) {
+        let level = if topmost {
+            OVERLAY_WINDOW_LEVEL
+        } else {
+            objc2_app_kit::NSNormalWindowLevel
+        };
+        get_ns_window(self).setLevel(level);
     }
 }

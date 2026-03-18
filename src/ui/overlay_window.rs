@@ -6,6 +6,7 @@ pub struct OverlayWindow {
     handle: AnyWindowHandle,
     visible: bool,
     click_through: bool,
+    always_on_top: bool,
 }
 
 impl Global for OverlayWindow {}
@@ -19,8 +20,10 @@ impl OverlayWindow {
             handle,
             visible: true,
             click_through: true,
+            always_on_top: true,
         };
         overlay.apply_interaction_mode(cx);
+        overlay.apply_window_level(cx);
         cx.set_global(overlay);
     }
 
@@ -52,6 +55,10 @@ impl OverlayWindow {
         self.click_through
     }
 
+    pub fn always_on_top(&self) -> bool {
+        self.always_on_top
+    }
+
     pub fn set_visible(&mut self, cx: &mut App, visible: bool) {
         self.visible = visible;
         self.handle
@@ -64,11 +71,24 @@ impl OverlayWindow {
         self.apply_interaction_mode(cx);
     }
 
+    pub fn set_always_on_top(&mut self, cx: &mut App, always_on_top: bool) {
+        self.always_on_top = always_on_top;
+        self.apply_window_level(cx);
+    }
+
     fn apply_interaction_mode(&self, cx: &mut App) {
         self.handle
             .update(cx, |_, window, _| {
                 window.set_ignore_cursor_events(self.click_through);
                 window.set_window_draggable(!self.click_through);
+            })
+            .ok();
+    }
+
+    fn apply_window_level(&self, cx: &mut App) {
+        self.handle
+            .update(cx, |_, window, _| {
+                window.set_window_topmost(self.always_on_top);
             })
             .ok();
     }

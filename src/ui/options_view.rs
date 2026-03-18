@@ -32,7 +32,6 @@ fn action_button(
 ) -> impl IntoElement {
     div()
         .id(id)
-        .mt_20()
         .px_3()
         .py_2()
         .rounded_sm()
@@ -263,6 +262,7 @@ impl Render for OptionsView {
         let tuning = RadarRuntime::global(cx).tuning();
         let overlay_visible = OverlayWindow::global(cx).is_visible();
         let click_through = OverlayWindow::global(cx).click_through();
+        let overlay_always_on_top = OverlayWindow::global(cx).always_on_top();
         let layout_locked = matches!(runtime.source_mode, SourceMode::SystemAudio);
 
         div().size_full().bg(rgb(0x171717)).child(
@@ -273,9 +273,9 @@ impl Render for OptionsView {
                 .gap_3()
                 .px_4()
                 .pb_4()
-                .pt(px(60.))
+                .pt(px(30.))
                 .text_color(rgb(0xf4f4f4))
-                .child(div().text_xl().child("Sound Radar"))
+                .child(div().text_xl().child("Sound Hearing Aid"))
                 .child(
                     div()
                         .id("options-scroll")
@@ -364,41 +364,45 @@ impl Render for OptionsView {
                                 ),
                         ))
                         .child(section(
-                            "Overlay",
-                            div().flex().flex_col().gap_2().child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(action_button(
-                                        "toggle-overlay",
-                                        if overlay_visible {
-                                            "Hide overlay"
-                                        } else {
-                                            "Show overlay"
-                                        },
-                                        |_window, cx| {
-                                            OverlayWindow::update_global(cx, |overlay, cx| {
-                                                overlay.set_visible(cx, !overlay.is_visible());
-                                            });
-                                        },
-                                    ))
-                                    .child(action_button(
-                                        "toggle-click-through",
-                                        if click_through {
-                                            "Draggable"
-                                        } else {
-                                            "Click-through"
-                                        },
-                                        |_window, cx| {
-                                            OverlayWindow::update_global(cx, |overlay, cx| {
-                                                overlay.set_click_through(
-                                                    cx,
-                                                    !overlay.click_through(),
-                                                );
-                                            });
-                                        },
-                                    )),
-                            ),
+                            "Hear Ring",
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(action_button(
+                                    "toggle-hear-ring",
+                                    if overlay_visible { "Hide" } else { "Show" },
+                                    |_window, cx| {
+                                        OverlayWindow::update_global(cx, |overlay, cx| {
+                                            overlay.set_visible(cx, !overlay.is_visible());
+                                        });
+                                    },
+                                ))
+                                .child(action_button(
+                                    "toggle-click-through",
+                                    if click_through {
+                                        "Draggable"
+                                    } else {
+                                        "Click-through"
+                                    },
+                                    |_window, cx| {
+                                        OverlayWindow::update_global(cx, |overlay, cx| {
+                                            overlay.set_click_through(cx, !overlay.click_through());
+                                        });
+                                    },
+                                ))
+                                .child(action_button(
+                                    "toggle-topmost",
+                                    if overlay_always_on_top {
+                                        "Unpin"
+                                    } else {
+                                        "Pin"
+                                    },
+                                    |_window, cx| {
+                                        OverlayWindow::update_global(cx, |overlay, cx| {
+                                            overlay.set_always_on_top(cx, !overlay.always_on_top());
+                                        });
+                                    },
+                                )),
                         ))
                         .child(section(
                             "Tuning",

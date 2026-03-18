@@ -7,7 +7,7 @@ mod source;
 mod types;
 mod ui;
 
-use gpui::{App, ReadGlobal};
+use gpui::{actions, App, KeyBinding, Menu, MenuItem, SystemMenuType};
 
 use crate::{
     runtime::RadarRuntime,
@@ -16,27 +16,38 @@ use crate::{
 
 const APP_IDENTIFIER: &str = "com.pk.sound-radar";
 
+actions!(app, [OpenPreferences, Quit]);
+
 fn setup(cx: &mut App) {
     gpui_component::init(cx);
     RadarRuntime::register_global(cx);
     OverlayWindow::register_global(cx);
     OptionsWindow::register_global(cx);
 
-    cx.on_window_closed(move |cx| {
-        let no_options_window = cx
-            .windows()
-            .iter()
-            .all(|handle| handle.window_id() != OptionsWindow::global(cx).handle().window_id());
+    cx.on_action(|_: &OpenPreferences, cx| OptionsWindow::show(cx));
+    cx.on_action(|_: &Quit, cx| cx.quit());
 
-        if no_options_window {
-            cx.quit();
-        }
-    })
-    .detach();
+    cx.bind_keys([
+        KeyBinding::new("cmd-,", OpenPreferences, None),
+        KeyBinding::new("cmd-q", Quit, None),
+    ]);
+
+    cx.set_menus(vec![Menu {
+        name: "Sound Radar".into(),
+        items: vec![
+            MenuItem::action("Preferences…", OpenPreferences),
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Quit", Quit),
+        ],
+    }]);
 
     cx.activate(true);
 }
 
 fn main() {
-    gpui::Application::new().run(setup);
+    let app = gpui::Application::new();
+    app.on_reopen(|cx| OptionsWindow::show(cx));
+    app.run(setup);
 }
