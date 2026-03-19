@@ -1,30 +1,18 @@
-# Sound Hearing Aid
+# Hear Ring
 
-A Rust prototype for visualizing directional audio as a small radar overlay.
-
-## Overview
-
-The app currently runs as a GPUI desktop app with two windows:
-
-- an **options window** for source selection, tuning, and diagnostics
-- a transparent **overlay window** that renders the radar ring
-
-At the core, the app converts audio input into channel energies, estimates a direction distribution, smooths the result, and renders it as a ring.
+Hear Ring is a desktop app that turns audio input into a radar overlay.
 
 ## Preview
 
-![Sound Hearig Aid preview](docs/Preview.jpg)
+![Hear Ring preview](docs/Preview.jpg)
 
 ## Current features
 
-- GPUI-based options window
-- GPUI-based transparent overlay window
-- demo audio source for testing without real capture
-- macOS system-audio capture via ScreenCaptureKit
-- stereo and 7.1 processing paths
-- configurable tuning controls for stereo estimation and smoothing
-- runtime diagnostics for channel energy and direction scores
-- draggable or click-through overlay interaction modes
+- GPUI options and overlay windows
+- demo and macOS system-audio sources
+- stereo and 7.1 direction estimation
+- tuning controls and runtime diagnostics
+- draggable or click-through overlay modes
 
 ## Processing pipeline
 
@@ -58,23 +46,16 @@ Enable your terminal app, then restart it before launching the project again.
 
 - real system-audio capture is macOS-only
 - real capture currently feeds the stereo path only
-- audio format and buffer handling still needs hardening
 - automatic channel-layout discovery is not implemented
 - multi-display overlay management is not implemented yet
 
 ## Status
 
-This is still a prototype, but the main architecture is now in place:
-
-- shared runtime
-- separate options and overlay windows
-- directional estimators
-- smoothing and tuning
-- radar rendering in the overlay
+Prototype, but the core runtime, estimation, and overlay are in place.
 
 ## Next likely work
 
-- harden the ScreenCaptureKit capture path
-- improve options-window layout and polish
+- add Linux support
+- add Windows support
 - expand overlay behavior toward full multi-display support
-- improve diagnostics and controller ergonomics
+- broaden real-capture direction handling beyond the stereo path

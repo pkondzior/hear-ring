@@ -14,7 +14,7 @@ use crate::{
     ui::{options_window::OptionsWindow, overlay_window::OverlayWindow},
 };
 
-const APP_IDENTIFIER: &str = "com.pk.sound-radar";
+const APP_IDENTIFIER: &str = "com.mixin.hear_ring";
 
 actions!(app, [OpenPreferences, Quit]);
 
@@ -33,7 +33,7 @@ fn setup(cx: &mut App) {
     ]);
 
     cx.set_menus(vec![Menu {
-        name: "Sound Radar".into(),
+        name: "Hear Ring".into(),
         items: vec![
             MenuItem::action("Preferences…", OpenPreferences),
             MenuItem::separator(),

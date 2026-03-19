@@ -275,7 +275,7 @@ impl Render for OptionsView {
                 .pb_4()
                 .pt(px(30.))
                 .text_color(rgb(0xf4f4f4))
-                .child(div().text_xl().child("Sound Hearing Aid"))
+                .child(div().text_xl().child("Hear Ring"))
                 .child(
                     div()
                         .id("options-scroll")
@@ -364,7 +364,7 @@ impl Render for OptionsView {
                                 ),
                         ))
                         .child(section(
-                            "Hear Ring",
+                            "Hear Ring Overlay",
                             div()
                                 .flex()
                                 .gap_2()

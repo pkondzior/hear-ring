@@ -27,7 +27,7 @@ impl OptionsWindow {
 
     fn setup_window(cx: &mut App) -> AnyWindowHandle {
         let titlebar = Some(gpui::TitlebarOptions {
-            title: Some("Sound Radar - Options".into()),
+            title: Some("Hear Ring".into()),
             appears_transparent: true,
             traffic_light_position: Some(point(px(12.), px(12.))),
         });
