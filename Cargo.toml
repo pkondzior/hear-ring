@@ -12,3 +12,8 @@ screencapturekit = { version = "1", features = ["macos_13_0"] }
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSResponder", "NSView", "NSWindow"] }
 raw-window-handle = "0.6"
+
+[package.metadata.bundle]
+name = "Hear Ring"
+identifier = "com.mixin.hear_ring"
+icon = ["assets/HearRing.icns"]
