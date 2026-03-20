@@ -3,8 +3,16 @@ use objc2_app_kit::{
     NSView, NSWindow, NSWindowCollectionBehavior, NSWindowLevel, NSWindowStyleMask,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use std::process::Command;
 
 use crate::platform::WindowExt;
+
+pub fn open_system_audio_preferences() -> std::io::Result<()> {
+    Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        .spawn()?;
+    Ok(())
+}
 
 fn get_ns_window(window: &gpui::Window) -> Retained<NSWindow> {
     let handle = HasWindowHandle::window_handle(window).unwrap().as_raw();

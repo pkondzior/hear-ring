@@ -5,6 +5,7 @@ use gpui::{
 use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 
 use crate::{
+    platform,
     runtime::{RadarRuntime, SourceMode},
     source::AudioSourceState,
     types::{ChannelLayout, Direction, EnergyChannel},
@@ -326,6 +327,21 @@ impl Render for OptionsView {
                                 .child(div().text_sm().text_color(rgb(0xbdbdbd)).child(
                                     source_help_text(runtime.source_mode, &runtime.source_state),
                                 ))
+                                .children(
+                                    (runtime.source_mode == SourceMode::SystemAudio
+                                        && runtime.source_state
+                                            == AudioSourceState::PermissionDenied)
+                                        .then(|| {
+                                            div().flex().child(action_button(
+                                                "open-system-audio-preferences",
+                                                "Open Preferences",
+                                                |_window, _cx| {
+                                                    let _ =
+                                                        platform::open_system_audio_preferences();
+                                                },
+                                            ))
+                                        }),
+                                )
                                 .child(
                                     div()
                                         .flex()

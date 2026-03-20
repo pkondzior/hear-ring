@@ -15,5 +15,18 @@ pub trait WindowExt {
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "macos")]
+pub fn open_system_audio_preferences() -> std::io::Result<()> {
+    macos::open_system_audio_preferences()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_system_audio_preferences() -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "System audio preferences are only available on macOS",
+    ))
+}
+
 #[cfg(not(target_os = "macos"))]
 impl WindowExt for gpui::Window {}

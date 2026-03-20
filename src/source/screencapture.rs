@@ -130,17 +130,7 @@ impl ScreenCaptureSource {
 
     fn map_error(error: impl std::fmt::Display) -> AudioSourceState {
         let message = error.to_string();
-        let lower = message.to_lowercase();
-
-        // ScreenCaptureKit fails early when Screen Recording permission has not been granted.
-        // The exact error type/message varies across macOS versions and host apps, so we
-        // conservatively match common substrings.
-        if lower.contains("screen recording")
-            || lower.contains("not authorized")
-            || lower.contains("not authorised")
-            || (lower.contains("permission") && lower.contains("denied"))
-            || (lower.contains("access") && lower.contains("denied"))
-        {
+        if is_permission_denied_message(&message) {
             return AudioSourceState::PermissionDenied;
         }
 
@@ -170,17 +160,25 @@ impl AudioSource for ScreenCaptureSource {
 
 impl SCStreamDelegateTrait for StreamErrorHandler {
     fn did_stop_with_error(&self, error: SCError) {
+        let message = error.to_string();
+
         if let Ok(mut guard) = self.shared.lock() {
-            guard.state =
-                AudioSourceState::Error(format!("ScreenCaptureKit stream error: {error}"));
+            guard.state = if is_permission_denied_message(&message) {
+                AudioSourceState::PermissionDenied
+            } else {
+                AudioSourceState::Error(format!("ScreenCaptureKit stream error: {message}"))
+            };
         }
     }
 
     fn stream_did_stop(&self, error: Option<String>) {
         if let Ok(mut guard) = self.shared.lock() {
-            guard.state = AudioSourceState::Error(
-                error.unwrap_or_else(|| "ScreenCaptureKit stream stopped".to_owned()),
-            );
+            let message = error.unwrap_or_else(|| "ScreenCaptureKit stream stopped".to_owned());
+            guard.state = if is_permission_denied_message(&message) {
+                AudioSourceState::PermissionDenied
+            } else {
+                AudioSourceState::Error(message)
+            };
         }
     }
 }
@@ -283,6 +281,19 @@ impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
 
         Ok(analysis)
     }
+}
+
+fn is_permission_denied_message(message: &str) -> bool {
+    let lower = message.to_lowercase();
+
+    // ScreenCaptureKit permission errors vary across macOS versions and call sites, so
+    // conservatively match the common permission/TCC variants we have observed.
+    lower.contains("screen recording")
+        || lower.contains("not authorized")
+        || lower.contains("not authorised")
+        || (lower.contains("permission") && lower.contains("denied"))
+        || (lower.contains("access") && lower.contains("denied"))
+        || (lower.contains("tcc") && (lower.contains("declined") || lower.contains("denied")))
 }
 
 impl From<StereoAnalysis> for ChannelEnergies {
