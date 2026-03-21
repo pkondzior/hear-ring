@@ -30,6 +30,19 @@ pub enum AudioSourceState {
 }
 
 impl AudioSourceState {
+    pub fn is_capture_permission_denied(message: &str) -> bool {
+        let lower = message.to_lowercase();
+
+        // ScreenCaptureKit permission errors vary across macOS versions and call sites, so
+        // conservatively match the common permission/TCC variants we have observed.
+        lower.contains("screen recording")
+            || lower.contains("not authorized")
+            || lower.contains("not authorised")
+            || (lower.contains("permission") && lower.contains("denied"))
+            || (lower.contains("access") && lower.contains("denied"))
+            || (lower.contains("tcc") && (lower.contains("declined") || lower.contains("denied")))
+    }
+
     pub fn label(&self) -> &str {
         match self {
             AudioSourceState::Running => "Running",
@@ -44,6 +57,16 @@ impl AudioSourceState {
         match self {
             AudioSourceState::Error(message) => Some(message.as_str()),
             _ => None,
+        }
+    }
+
+    pub fn from_capture_error(message: impl AsRef<str>) -> Self {
+        let message = message.as_ref();
+
+        if Self::is_capture_permission_denied(message) {
+            Self::PermissionDenied
+        } else {
+            Self::Error(message.to_owned())
         }
     }
 }

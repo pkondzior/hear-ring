@@ -1,7 +1,9 @@
+use std::fmt;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use screencapturekit::prelude::*;
+use screencapturekit::CMFormatDescription;
 
 use super::{AudioSource, AudioSourceState};
 use crate::types::{ChannelEnergies, ChannelLayout};
@@ -14,6 +16,12 @@ struct StereoAnalysis {
     width: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PcmFormat {
+    channel_count: usize,
+    bytes_per_frame: usize,
+}
+
 #[derive(Debug)]
 enum StereoDecodeError {
     InvalidSampleBuffer,
@@ -22,30 +30,40 @@ enum StereoDecodeError {
     UnsupportedAudioFormat,
 }
 
-impl StereoDecodeError {
-    fn message(&self) -> String {
+impl fmt::Display for StereoDecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StereoDecodeError::InvalidSampleBuffer => "Audio sample buffer is invalid".to_owned(),
+            StereoDecodeError::InvalidSampleBuffer => write!(f, "Audio sample buffer is invalid"),
             StereoDecodeError::SampleNotReady(status) => {
-                format!("Audio sample not ready (status {status})")
+                write!(f, "Audio sample not ready (status {status})")
             }
             StereoDecodeError::MissingFormatDescription => {
-                "Audio sample missing format description".to_owned()
+                write!(f, "Audio sample missing format description")
             }
             StereoDecodeError::UnsupportedAudioFormat => {
-                "Audio format is not supported PCM".to_owned()
+                write!(f, "Audio format is not supported PCM")
             }
         }
     }
 }
 
+trait SampleBytesExt {
+    fn try_samples(&self) -> Result<&[f32], StereoDecodeError>;
+}
+
+impl SampleBytesExt for [u8] {
+    fn try_samples(&self) -> Result<&[f32], StereoDecodeError> {
+        bytemuck::try_cast_slice(self).map_err(|_| StereoDecodeError::UnsupportedAudioFormat)
+    }
+}
+
 #[derive(Clone)]
-struct SharedCaptureState {
+struct InnerCaptureState {
     energies: ChannelEnergies,
     state: AudioSourceState,
 }
 
-impl Default for SharedCaptureState {
+impl Default for InnerCaptureState {
     fn default() -> Self {
         Self {
             energies: ChannelEnergies::default(),
@@ -54,32 +72,61 @@ impl Default for SharedCaptureState {
     }
 }
 
+#[derive(Clone)]
+struct CaptureState(Arc<Mutex<InnerCaptureState>>);
+
+impl CaptureState {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(InnerCaptureState::default())))
+    }
+
+    fn update(&self, update: impl FnOnce(&mut InnerCaptureState)) {
+        if let Ok(mut state) = self.0.lock() {
+            update(&mut state);
+        }
+    }
+
+    fn energies(&self) -> ChannelEnergies {
+        self.0
+            .lock()
+            .map(|state| state.energies)
+            .unwrap_or_default()
+    }
+
+    fn source_state(&self) -> AudioSourceState {
+        self.0
+            .lock()
+            .map(|state| state.state.clone())
+            .unwrap_or_else(|_| AudioSourceState::Error("Capture state lock poisoned".to_owned()))
+    }
+}
+
 pub struct ScreenCaptureSource {
-    shared: Arc<Mutex<SharedCaptureState>>,
+    shared: CaptureState,
     _stream: Option<SCStream>,
 }
 
 struct StreamErrorHandler {
-    shared: Arc<Mutex<SharedCaptureState>>,
+    shared: CaptureState,
 }
 
 struct NoopScreenHandler;
 
 impl ScreenCaptureSource {
     pub fn new() -> Self {
-        let shared = Arc::new(Mutex::new(SharedCaptureState::default()));
+        let shared = CaptureState::new();
 
         let stream = match Self::start_capture(shared.clone()) {
             Ok(stream) => {
-                if let Ok(mut guard) = shared.lock() {
-                    guard.state = AudioSourceState::Running;
-                }
+                shared.update(|state| {
+                    state.state = AudioSourceState::Running;
+                });
                 Some(stream)
             }
             Err(state) => {
-                if let Ok(mut guard) = shared.lock() {
-                    guard.state = state;
-                }
+                shared.update(|shared_state| {
+                    shared_state.state = state;
+                });
                 None
             }
         };
@@ -90,7 +137,7 @@ impl ScreenCaptureSource {
         }
     }
 
-    fn start_capture(shared: Arc<Mutex<SharedCaptureState>>) -> Result<SCStream, AudioSourceState> {
+    fn start_capture(shared: CaptureState) -> Result<SCStream, AudioSourceState> {
         let content = SCShareableContent::get().map_err(Self::map_error)?;
 
         let display = content.displays().into_iter().next().ok_or_else(|| {
@@ -129,12 +176,7 @@ impl ScreenCaptureSource {
     }
 
     fn map_error(error: impl std::fmt::Display) -> AudioSourceState {
-        let message = error.to_string();
-        if is_permission_denied_message(&message) {
-            return AudioSourceState::PermissionDenied;
-        }
-
-        AudioSourceState::Error(message)
+        AudioSourceState::from_capture_error(error.to_string())
     }
 }
 
@@ -144,17 +186,11 @@ impl AudioSource for ScreenCaptureSource {
     }
 
     fn next_energies(&mut self, _dt: f32) -> ChannelEnergies {
-        self.shared
-            .lock()
-            .map(|guard| guard.energies)
-            .unwrap_or_default()
+        self.shared.energies()
     }
 
     fn state(&self) -> AudioSourceState {
-        self.shared
-            .lock()
-            .map(|guard| guard.state.clone())
-            .unwrap_or_else(|_| AudioSourceState::Error("Capture state lock poisoned".to_owned()))
+        self.shared.source_state()
     }
 }
 
@@ -162,24 +198,21 @@ impl SCStreamDelegateTrait for StreamErrorHandler {
     fn did_stop_with_error(&self, error: SCError) {
         let message = error.to_string();
 
-        if let Ok(mut guard) = self.shared.lock() {
-            guard.state = if is_permission_denied_message(&message) {
+        self.shared.update(|state| {
+            state.state = if AudioSourceState::is_capture_permission_denied(&message) {
                 AudioSourceState::PermissionDenied
             } else {
                 AudioSourceState::Error(format!("ScreenCaptureKit stream error: {message}"))
             };
-        }
+        });
     }
 
     fn stream_did_stop(&self, error: Option<String>) {
-        if let Ok(mut guard) = self.shared.lock() {
-            let message = error.unwrap_or_else(|| "ScreenCaptureKit stream stopped".to_owned());
-            guard.state = if is_permission_denied_message(&message) {
-                AudioSourceState::PermissionDenied
-            } else {
-                AudioSourceState::Error(message)
-            };
-        }
+        self.shared.update(|state| {
+            state.state = AudioSourceState::from_capture_error(
+                error.unwrap_or_else(|| "ScreenCaptureKit stream stopped".to_owned()),
+            );
+        });
     }
 }
 
@@ -188,45 +221,31 @@ impl SCStreamOutputTrait for NoopScreenHandler {
 }
 
 struct AudioCaptureHandler {
-    shared: Arc<Mutex<SharedCaptureState>>,
+    shared: CaptureState,
 }
 
 impl SCStreamOutputTrait for AudioCaptureHandler {
     fn did_output_sample_buffer(&self, sample: CMSampleBuffer, _type: SCStreamOutputType) {
         match StereoAnalysis::try_from(&sample) {
             Ok(analysis) => {
-                if let Ok(mut guard) = self.shared.lock() {
-                    guard.energies = analysis.into();
-                    guard.state = AudioSourceState::Running;
-                }
+                self.shared.update(|state| {
+                    state.energies = analysis.into();
+                    state.state = AudioSourceState::Running;
+                });
             }
             Err(error) => {
-                if let Ok(mut guard) = self.shared.lock() {
-                    guard.state = AudioSourceState::Error(error.message());
-                }
+                self.shared.update(|state| {
+                    state.state = AudioSourceState::Error(error.to_string());
+                });
             }
         }
     }
 }
 
-impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
+impl TryFrom<&CMFormatDescription> for PcmFormat {
     type Error = StereoDecodeError;
 
-    fn try_from(sample: &CMSampleBuffer) -> Result<Self, Self::Error> {
-        if !sample.is_valid() {
-            return Err(StereoDecodeError::InvalidSampleBuffer);
-        }
-
-        if !sample.is_data_ready() {
-            sample
-                .make_data_ready()
-                .map_err(StereoDecodeError::SampleNotReady)?;
-        }
-
-        let format = sample
-            .format_description()
-            .ok_or(StereoDecodeError::MissingFormatDescription)?;
-
+    fn try_from(format: &CMFormatDescription) -> Result<Self, Self::Error> {
         if !format.is_audio() || !format.is_pcm() {
             return Err(StereoDecodeError::UnsupportedAudioFormat);
         }
@@ -253,6 +272,32 @@ impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
             return Err(StereoDecodeError::UnsupportedAudioFormat);
         }
 
+        Ok(Self {
+            channel_count,
+            bytes_per_frame,
+        })
+    }
+}
+
+impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
+    type Error = StereoDecodeError;
+
+    fn try_from(sample: &CMSampleBuffer) -> Result<Self, Self::Error> {
+        if !sample.is_valid() {
+            return Err(StereoDecodeError::InvalidSampleBuffer);
+        }
+
+        if !sample.is_data_ready() {
+            sample
+                .make_data_ready()
+                .map_err(StereoDecodeError::SampleNotReady)?;
+        }
+
+        let format = sample
+            .format_description()
+            .ok_or(StereoDecodeError::MissingFormatDescription)?;
+        let pcm = PcmFormat::try_from(&format)?;
+
         let buffers = sample
             .audio_buffer_list()
             .ok_or(StereoDecodeError::UnsupportedAudioFormat)?;
@@ -263,8 +308,8 @@ impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
                     .get(0)
                     .ok_or(StereoDecodeError::UnsupportedAudioFormat)?
                     .data(),
-                channel_count,
-                bytes_per_frame,
+                pcm.channel_count,
+                pcm.bytes_per_frame,
             )?,
             count if count >= 2 => analyze_planar(
                 buffers
@@ -281,19 +326,6 @@ impl TryFrom<&CMSampleBuffer> for StereoAnalysis {
 
         Ok(analysis)
     }
-}
-
-fn is_permission_denied_message(message: &str) -> bool {
-    let lower = message.to_lowercase();
-
-    // ScreenCaptureKit permission errors vary across macOS versions and call sites, so
-    // conservatively match the common permission/TCC variants we have observed.
-    lower.contains("screen recording")
-        || lower.contains("not authorized")
-        || lower.contains("not authorised")
-        || (lower.contains("permission") && lower.contains("denied"))
-        || (lower.contains("access") && lower.contains("denied"))
-        || (lower.contains("tcc") && (lower.contains("declined") || lower.contains("denied")))
 }
 
 impl From<StereoAnalysis> for ChannelEnergies {
@@ -313,8 +345,8 @@ fn analyze_planar(
     left_bytes: &[u8],
     right_bytes: &[u8],
 ) -> Result<StereoAnalysis, StereoDecodeError> {
-    let left = samples(left_bytes)?;
-    let right = samples(right_bytes)?;
+    let left = left_bytes.try_samples()?;
+    let right = right_bytes.try_samples()?;
 
     let frame_count = left.len().min(right.len());
     if frame_count == 0 {
@@ -345,11 +377,11 @@ fn analyze_interleaved(
     }
 
     let samples_per_frame = bytes_per_frame / size_of::<f32>();
-    if samples_per_frame < channel_count || channel_count == 0 {
+    if samples_per_frame < channel_count {
         return Err(StereoDecodeError::UnsupportedAudioFormat);
     }
 
-    let samples = samples(bytes)?;
+    let samples = bytes.try_samples()?;
 
     let frame_count = bytes.len() / bytes_per_frame;
     if frame_count == 0 {
@@ -362,15 +394,6 @@ fn analyze_interleaved(
         let right = samples[base + (1usize.min(channel_count.saturating_sub(1)))];
         (left, right)
     })))
-}
-
-fn samples(bytes: &[u8]) -> Result<&[f32], StereoDecodeError> {
-    if bytes.len() % size_of::<f32>() != 0 {
-        return Err(StereoDecodeError::UnsupportedAudioFormat);
-    }
-
-    let sample_count = bytes.len() / size_of::<f32>();
-    Ok(unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<f32>(), sample_count) })
 }
 
 fn analyze_pairs<I>(pairs: I) -> StereoAnalysis
